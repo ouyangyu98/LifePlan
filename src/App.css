@@ -41,9 +41,8 @@ body.pomodoro-floating-mode .app-shell { padding-top: 0; }
 .daily-date-context.ant-typography { color: #262626; font-size: 14px; line-height: 20px; white-space: nowrap; }
 .daily-weekday-name { color: #262626; font-weight: 500; }
 .daily-today-tag.ant-tag { margin: 0; }
-.daily-date-cell { position: relative; display: flex; justify-content: center; width: 100%; }
-.daily-date-cell .ant-picker-cell-inner { width: 100%; }
-.daily-date-used-dot { position: absolute; right: 50%; bottom: 3px; width: 5px; height: 5px; border: 1px solid #fff; border-radius: 50%; background: #52c41a; box-shadow: 0 0 0 1px rgba(82, 196, 26, .22); transform: translateX(50%); pointer-events: none; }
+.daily-date-cell { position: relative; display: inline-flex; justify-content: center; vertical-align: top; }
+.daily-date-used-dot { position: absolute; z-index: 1; top: -2px; right: -3px; width: 6px; height: 6px; border: 1px solid #fff; border-radius: 50%; background: #52c41a; pointer-events: none; }
 .daily-record-list { gap: 8px; }
 .daily-item-card .ant-card-body { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; }
 .daily-item-main { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }

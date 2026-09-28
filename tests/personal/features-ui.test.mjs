@@ -110,6 +110,7 @@ test("personal features UI with isolated Tauri fixtures", { timeout: 120000 }, a
   try {
     await page.goto(`${baseUrl}/#/inbox`);
     await page.getByRole("tab", { name: /待处理 3/ }).waitFor();
+    assert.equal(await page.getByRole("tab", { name: /进行中 3/ }).getAttribute("aria-selected"), "true");
     const tabs = ["待处理", "进行中", "推迟", "已放弃", "已完成"];
     const statusKeys = [0, 1, 3, 4, 5];
     for (const [index, tab] of tabs.entries()) {
@@ -122,6 +123,7 @@ test("personal features UI with isolated Tauri fixtures", { timeout: 120000 }, a
     }
     await page.reload();
     await page.locator(".event-board-column").first().waitFor();
+    assert.equal(await page.getByRole("tab", { name: /进行中 3/ }).getAttribute("aria-selected"), "true");
     for (const tab of tabs) {
       await page.getByRole("tab", { name: new RegExp(tab) }).click();
       assert.equal(await page.locator(".event-board-column").count(), 3);
@@ -295,6 +297,7 @@ test("daily calendar marks dates used by Today Tasks", { timeout: 60000 }, async
   const browser = await chromium.launch({ channel: "chrome", headless: true });
   const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
   page.setDefaultTimeout(8000);
+  await page.clock.install({ time: new Date("2026-09-28T12:00:00") });
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript(() => {
@@ -321,6 +324,16 @@ test("daily calendar marks dates used by Today Tasks", { timeout: 60000 }, async
     await panel.waitFor();
     assert.equal(await panel.locator(".daily-date-used-dot").count(), 2);
     assert.equal(await panel.locator("[aria-label='这天使用过今日事']").count(), 2);
+    const positions = await panel.locator(".daily-date-cell").evaluateAll((cells) => cells.map((cell) => {
+      const digit = cell.querySelector(".ant-picker-cell-inner").getBoundingClientRect();
+      const dot = cell.querySelector(".daily-date-used-dot").getBoundingClientRect();
+      return dot.x >= digit.right - 4 && dot.bottom <= digit.top + 5;
+    }));
+    assert.ok(positions.every(Boolean), "Markers must sit above the date's upper-right corner");
+    if (screenshots) {
+      await mkdir(screenshots, { recursive: true });
+      await panel.screenshot({ path: path.join(screenshots, "daily-calendar-corner.png") });
+    }
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

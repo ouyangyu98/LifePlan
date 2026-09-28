@@ -115,7 +115,7 @@ export default function Inbox() {
   const [expandedEventIds, setExpandedEventIds] = useState<Set<number>>(
     () => new Set(),
   );
-  const [filter, setFilter] = useState<InboxTab>("pending");
+  const [filter, setFilter] = useState<InboxTab>("events");
   const [views, setViews] = useState<Record<InboxTab, InboxView>>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(inboxViewStorageKey) || "{}") as Partial<Record<InboxTab, InboxView>>;
