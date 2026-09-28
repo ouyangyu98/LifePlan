@@ -290,3 +290,39 @@ test("insights persistence, recovery and responsive editor", { timeout: 90000 },
     await browser.close();
   }
 });
+
+test("daily calendar marks dates used by Today Tasks", { timeout: 60000 }, async () => {
+  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
+  page.setDefaultTimeout(8000);
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.addInitScript(() => {
+    localStorage.setItem("lifeplan-onboarding-v1-completed", "1");
+    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
+    window.__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
+      transformCallback: () => 1,
+      unregisterCallback() {},
+      invoke: async (cmd) => {
+        if (cmd === "get_startup_notice") return null;
+        if (cmd === "get_daily_schedule") return { list_date: "2026-09-28", slots: [] };
+        if (cmd === "get_actions") return [];
+        if (cmd === "get_daily_used_dates") return ["2026-09-26", "2026-09-28"];
+        if (cmd === "plugin:event|listen") return 1;
+        return [];
+      },
+    };
+  });
+  try {
+    await page.goto(`${baseUrl}/#/daily-list`);
+    await page.locator(".daily-date-panel .ant-picker").click();
+    const panel = page.locator(".ant-picker-dropdown:visible");
+    await panel.waitFor();
+    assert.equal(await panel.locator(".daily-date-used-dot").count(), 2);
+    assert.equal(await panel.locator("[aria-label='这天使用过今日事']").count(), 2);
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});

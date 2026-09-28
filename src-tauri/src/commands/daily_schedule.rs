@@ -141,6 +141,33 @@ fn schedule(conn: &Connection, list_date: &str) -> rusqlite::Result<DailySchedul
         slots: slot_query(conn, list_date)?,
     })
 }
+
+pub(super) fn used_dates(conn: &Connection) -> rusqlite::Result<Vec<String>> {
+    let space_id = current_space_id(conn).map_err(db_error)?;
+    let mut statement = conn.prepare(
+        "SELECT list_date
+         FROM (
+             SELECT DISTINCT list_date
+             FROM daily_list_items
+             WHERE space_id = ?1
+             UNION
+             SELECT DISTINCT list_date
+             FROM daily_schedule_slots
+             WHERE space_id = ?1
+               AND (
+                   action_id IS NOT NULL
+                   OR COALESCE(TRIM(actual_notes), '') <> ''
+                   OR met_expectation IS NOT NULL
+                   OR focused IS NOT NULL
+               )
+         )
+         ORDER BY list_date",
+    )?;
+    let result = statement
+        .query_map([space_id], |row| row.get(0))?
+        .collect();
+    result
+}
 fn overlap_exists(
     conn: &Connection,
     space_id: &str,
@@ -184,6 +211,13 @@ pub fn get_daily_schedule(
     ensure_day(&conn, &list_date)?;
     schedule(&conn, &list_date).map_err(|error| error.to_string())
 }
+
+#[tauri::command]
+pub fn get_daily_used_dates(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let conn = state.db.lock().map_err(|error| error.to_string())?;
+    used_dates(&conn).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub fn initialize_daily_schedule(
     state: State<'_, AppState>,

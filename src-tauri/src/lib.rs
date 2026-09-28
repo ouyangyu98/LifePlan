@@ -187,6 +187,7 @@ pub fn run() {
             daily_list::remove_daily_list_item,
             daily_list::reorder_daily_list,
             daily_schedule::get_daily_schedule,
+            daily_schedule::get_daily_used_dates,
             daily_schedule::initialize_daily_schedule,
             daily_schedule::create_daily_slot,
             daily_schedule::update_daily_slot,

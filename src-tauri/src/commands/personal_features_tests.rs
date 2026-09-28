@@ -236,3 +236,49 @@ fn migrated_actions_decode_identically_in_daily_readers_and_delete_keeps_parent(
     assert!(parent.history_note.unwrap().contains("Historical person"));
     assert!(actions::list_actions(&conn).unwrap().is_empty());
 }
+
+#[test]
+fn used_dates_include_plans_and_reviews_but_not_empty_schedule_days() {
+    let state = state();
+    let event = event(&state, None);
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute("UPDATE events SET status=1 WHERE id=?1", [event.id]).unwrap();
+    }
+    let action = actions::create_action_impl(&state, serde_json::from_value(json!({
+        "event_id": event.id, "title": "Planned", "estimated_hours": 1, "is_frog": 0
+    })).unwrap()).unwrap();
+    let space = current_space_id(&state.db.lock().unwrap()).unwrap();
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute(
+            "INSERT INTO daily_schedule_days (space_id, list_date, created_at)
+             VALUES (?1, '2026-09-25', 1), (?1, '2026-09-26', 1), (?1, '2026-09-27', 1)",
+            [&space],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO daily_schedule_slots
+             (space_id, list_date, start_time, end_time, actual_notes, created_at, updated_at)
+             VALUES (?1, '2026-09-25', '09:00', '10:00', NULL, 1, 1),
+                    (?1, '2026-09-26', '09:00', '10:00', '完成复盘', 1, 1),
+                    (?1, '2026-09-27', '09:00', '10:00', NULL, 1, 1)",
+            [&space],
+        ).unwrap();
+        conn.execute(
+            "UPDATE daily_schedule_slots
+             SET met_expectation = 1
+             WHERE list_date = '2026-09-27'",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO daily_list_items (space_id, action_id, list_date, sort_order, created_at)
+             VALUES (?1, ?2, '2026-09-28', 1, 1)",
+            params![space, action.id],
+        ).unwrap();
+    }
+    let conn = state.db.lock().unwrap();
+    assert_eq!(
+        daily_schedule::used_dates(&conn).unwrap(),
+        vec!["2026-09-26", "2026-09-27", "2026-09-28"]
+    );
+}
