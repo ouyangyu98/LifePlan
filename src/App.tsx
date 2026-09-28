@@ -32,12 +32,18 @@ import Insights from "@/pages/Insights";
 import DailyList from "@/pages/DailyList";
 import Pomodoro from "@/pages/Pomodoro";
 import Rewards from "@/pages/Rewards";
+import Settings from "@/pages/Settings";
+import { FeaturePreferencesProvider, OptionalFeature } from "@/lib/featurePreferences";
 import { systemApi } from "@/lib/api";
 import type { StartupNotice } from "@/types";
 import { track } from "@/lib/analytics";
 import OnboardingCarousel from "@/components/ui/OnboardingCarousel";
 
 export default function App() {
+  return <FeaturePreferencesProvider><AppContent /></FeaturePreferencesProvider>;
+}
+
+function AppContent() {
   const [notice, setNotice] = useState<StartupNotice | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState("");
@@ -103,10 +109,9 @@ export default function App() {
       action={notice.kind === "backup_warning" ? <Button size="small" loading={retrying} onClick={() => void retryBackup()}>立即重试</Button> : undefined}
     />}
     {showOnboarding && <OnboardingCarousel onFinish={() => setShowOnboarding(false)} />}
-    <HashRouter><Routes><Route path="/" element={<Layout />}><Route index element={<Navigate to="/daily-list" replace />} /><Route path="daily-list" element={<DailyList />} /><Route path="pomodoro" element={<Pomodoro />} /><Route path="rewards" element={<Rewards />} /><Route path="inbox" element={<Inbox />} /><Route path="insights" element={<Insights />} /></Route></Routes></HashRouter>
+    <HashRouter><Routes><Route path="/" element={<Layout />}><Route index element={<Navigate to="/daily-list" replace />} /><Route path="daily-list" element={<DailyList />} /><Route path="pomodoro" element={<OptionalFeature feature="pomodoro"><Pomodoro /></OptionalFeature>} /><Route path="rewards" element={<OptionalFeature feature="rewards"><Rewards /></OptionalFeature>} /><Route path="inbox" element={<Inbox />} /><Route path="insights" element={<OptionalFeature feature="insights"><Insights /></OptionalFeature>} /><Route path="settings" element={<Settings />} /></Route></Routes></HashRouter>
   </ConfigProvider>;
 }
-
 
 
 

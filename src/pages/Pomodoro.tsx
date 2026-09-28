@@ -8,6 +8,7 @@ import type { Action, PomodoroRecord, PomodoroStatus } from "@/types";
 import { userFacingError } from "@/lib/errors";
 import { track } from "@/lib/analytics";
 import { loadFloatingPosition, loadFloatingSize, saveFloatingMode, saveFloatingPosition, saveFloatingSize } from "@/lib/windowPreferences";
+import { useFeaturePreferences } from "@/lib/featurePreferences";
 
 type PomodoroPhase = "work" | "rest";
 type WindowSnapshot = { size: PhysicalSize; position: PhysicalPosition };
@@ -114,6 +115,7 @@ const getPhaseInfo = (plannedSeconds: number, elapsedSeconds: number) => {
 };
 
 export default function Pomodoro() {
+  const { features } = useFeaturePreferences();
   const [status, setStatus] = useState<PomodoroStatus>({ total_points: 0 });
   const [records, setRecords] = useState<PomodoroRecord[]>([]);
   const [actions, setActions] = useState<Action[]>([]);
@@ -432,7 +434,7 @@ export default function Pomodoro() {
         <Typography.Title level={2} className="page-title">番茄钟</Typography.Title>
         <Typography.Paragraph className="page-subtitle">用一段不被打扰的专注，换取可见的进步。</Typography.Paragraph>
       </div>
-      <div className="pomodoro-header-actions">
+      {features.rewards && <div className="pomodoro-header-actions">
         <div
           className="rewards-balance pomodoro-rewards-link"
           role="button"
@@ -448,7 +450,7 @@ export default function Pomodoro() {
         >
           <Gift size={20} />{status.total_points}<span>积分</span>
         </div>
-      </div>
+      </div>}
       {isFloating && <div className="pomodoro-drag-handle" data-tauri-drag-region="true" onMouseDown={(event) => { if (event.button === 0) { event.preventDefault(); void getCurrentWindow().startDragging(); } }} role="button" tabIndex={-1} aria-label="拖动窗口"><span className="pomodoro-drag-dots"><i /><i /><i /><i /><i /><i /></span></div>}
     </header>
     {isFloating && <div className="pomodoro-resize-layer" aria-hidden="true">
@@ -463,7 +465,7 @@ export default function Pomodoro() {
         {completionResult ? <div className="pomodoro-completion" role="status">
           <div className="pomodoro-completion-icon" aria-hidden="true">🎉</div>
           <Typography.Title level={3}>恭喜你完成了 {completionResult.points} 个专注</Typography.Title>
-          <Typography.Paragraph>坚持到底，本次获得了 <strong>{completionResult.points}</strong> 积分</Typography.Paragraph>
+          {features.rewards && <Typography.Paragraph>坚持到底，本次获得了 <strong>{completionResult.points}</strong> 积分</Typography.Paragraph>}
           <div className="pomodoro-completion-actions">
             <Button size="large" loading={reviewNavigating} onClick={() => void goToReview()}>去复盘</Button>
             <Button type="primary" size="large" icon={<Play size={17} />} onClick={() => void startNewFocus()}>开启新专注</Button>
@@ -481,18 +483,17 @@ export default function Pomodoro() {
           </div> : <>
             <Space className="pomodoro-active-controls" size="middle"><Button type="primary" size="large" icon={<Play size={16} />} onClick={() => void finish(1)}>立即完成</Button><Button size="large" danger icon={<TimerReset size={16} />} onClick={() => setInterruptOpen(true)}>放弃并中断</Button></Space>
           </>}
-          <div className="pomodoro-tip">{active ? `本次${durationLabel(active.planned_seconds)}，每轮工作 25 分钟后休息 5 分钟。` : `完成一次${durationLabel(plannedSeconds)}，可获得 1 积分。`}</div>
+          {(active || features.rewards) && <div className="pomodoro-tip">{active ? `本次${durationLabel(active.planned_seconds)}，每轮工作 25 分钟后休息 5 分钟。` : `完成一次${durationLabel(plannedSeconds)}，可获得 1 积分。`}</div>}
         </>}
       </Card>
       <Card title="专注记录" bordered={false} className="pomodoro-history">
-        <div className="pomodoro-history-list">{historyRecords.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有番茄记录" /> : visibleRecords.map((item) => <div className="pomodoro-history-item" key={item.id}><div><Typography.Text strong>{item.action_title || "自由专注"}</Typography.Text><div className="pomodoro-history-meta">{new Date(item.start_time).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} · {historyDuration(item.planned_seconds)}</div></div><Space><Tag color={item.status === 1 ? "green" : item.status === 2 ? "orange" : "blue"}>{statusText(item.status)}</Tag>{item.points_awarded > 0 && <Tag color="gold">+{item.points_awarded} 分</Tag>}</Space></div>)}</div>
+        <div className="pomodoro-history-list">{historyRecords.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有番茄记录" /> : visibleRecords.map((item) => <div className="pomodoro-history-item" key={item.id}><div><Typography.Text strong>{item.action_title || "自由专注"}</Typography.Text><div className="pomodoro-history-meta">{new Date(item.start_time).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} · {historyDuration(item.planned_seconds)}</div></div><Space><Tag color={item.status === 1 ? "green" : item.status === 2 ? "orange" : "blue"}>{statusText(item.status)}</Tag>{features.rewards && item.points_awarded > 0 && <Tag color="gold">+{item.points_awarded} 分</Tag>}</Space></div>)}</div>
         {historyRecords.length > recordsPageSize && <Pagination size="small" current={recordsPage} pageSize={recordsPageSize} total={historyRecords.length} showSizeChanger={false} onChange={setRecordsPage} />}
       </Card>
     </div>}
     <Modal title="记录番茄中断" open={interruptOpen} onCancel={() => setInterruptOpen(false)} okText="保存" cancelText="取消" confirmLoading={interrupting} onOk={() => void form.submit()}><Form form={form} layout="vertical" onFinish={(values) => void submitInterrupt(values)}><Form.Item name="interruptType" label="打断类型" initialValue={0} rules={[{ required: true }]}><Select options={[{ value: 0, label: "内部分心" }, { value: 1, label: "外部干扰" }, { value: 2, label: "紧急事务" }]} /></Form.Item><Form.Item name="reason" label="打断原因"><Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} /></Form.Item></Form></Modal>
   </div>;
 }
-
 
 
 

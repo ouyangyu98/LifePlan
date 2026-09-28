@@ -2,18 +2,19 @@ import { useEffect, useState, type MouseEvent } from "react";
 import { availableMonitors, getCurrentWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
 import { isFloatingModeSaved, loadWindowGeometry, saveWindowGeometry } from "@/lib/windowPreferences";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Archive, CalendarCheck, ArrowDown, Gift, HelpCircle, LoaderCircle, Minus, NotebookPen, Square, Timer, X } from "lucide-react";
+import { Archive, CalendarCheck, ArrowDown, Gift, HelpCircle, LoaderCircle, Minus, NotebookPen, Settings, Square, Timer, X } from "lucide-react";
 import { Layout as AntLayout, Menu, message, Tooltip } from "antd";
 import "@/App.css";
 import { exportAnalyticsLog, track } from "@/lib/analytics";
 import { checkForUpdate, installUpdate, type AvailableUpdate } from "@/lib/updater";
+import { useFeaturePreferences, type FeatureKey } from "@/lib/featurePreferences";
 
-const navItems = [
+const navItems: { to: string; icon: typeof Archive; label: string; feature?: FeatureKey }[] = [
   { to: "/daily-list", icon: CalendarCheck, label: "今日事" },
   { to: "/inbox", icon: Archive, label: "事件篮" },
-  { to: "/insights", icon: NotebookPen, label: "心得" },
-  { to: "/pomodoro", icon: Timer, label: "番茄钟" },
-  { to: "/rewards", icon: Gift, label: "奖励池" },
+  { to: "/insights", icon: NotebookPen, label: "心得", feature: "insights" },
+  { to: "/pomodoro", icon: Timer, label: "番茄钟", feature: "pomodoro" },
+  { to: "/rewards", icon: Gift, label: "奖励池", feature: "rewards" },
 ];
 
 const quotes = [
@@ -47,6 +48,7 @@ const quotes = [
 ].map((quote) => quote.replace(/\s+/g, ""));
 
 export default function Layout() {
+  const { features } = useFeaturePreferences();
   const location = useLocation();
   const [logoClicks, setLogoClicks] = useState<number[]>([]);
   const [quote, setQuote] = useState(() => quotes[Math.floor(Math.random() * quotes.length)]);
@@ -204,10 +206,13 @@ export default function Layout() {
     </div>
     <AntLayout.Sider className="sidebar" width={148} theme="light">
       <div className="brand" onClick={handleLogoClick} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") handleLogoClick(); }} aria-label="LifePlan"><span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><rect x="1.5" y="1.5" width="29" height="29" rx="8" fill="currentColor" /><path d="M15 19V9.5M15 19H21.5" fill="none" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg></span><span>LifePlan</span>{availableUpdate && (<Tooltip title={isInstallingUpdate ? "正在下载并安装更新" : `发现新版本 ${availableUpdate.version}，点击下载更新`}><button type="button" className="brand-update-button" aria-label={isInstallingUpdate ? "正在下载并安装更新" : `下载 LifePlan ${availableUpdate.version} 更新`} disabled={isInstallingUpdate} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void handleInstallUpdate(); }}>{isInstallingUpdate ? <LoaderCircle className="brand-update-spinner" size={10} /> : <ArrowDown size={10} />}</button></Tooltip>)}</div>
-      <Menu mode="inline" selectedKeys={[location.pathname]} items={navItems.map(({ to, icon: Icon, label }) => ({ key: to, label: <NavLink to={to}>{label}</NavLink>, icon: <Icon size={17} /> }))} />
+      <Menu mode="inline" selectedKeys={location.pathname === "/settings" ? [] : [location.pathname]} items={navItems.filter(({ feature }) => !feature || features[feature]).map(({ to, icon: Icon, label }) => ({ key: to, label: <NavLink to={to}>{label}</NavLink>, icon: <Icon size={17} /> }))} />
       <Tooltip title={quote} placement="right" mouseEnterDelay={0.2} color="#fff" classNames={{ root: "sidebar-quote-tooltip" }} styles={{ container: { color: "#303133", backgroundColor: "#fff", boxShadow: "0 4px 12px rgba(0, 0, 0, .12)" } }}>
         <div className="sidebar-note" tabIndex={0} onMouseDown={(event) => event.preventDefault()} onDoubleClick={refreshQuote} aria-label="双击更换名言警句">{quote}</div>
       </Tooltip>
+      <div className="sidebar-settings">
+        <Menu mode="inline" selectedKeys={location.pathname === "/settings" ? ["/settings"] : []} items={[{ key: "/settings", label: <NavLink to="/settings">设置</NavLink>, icon: <Settings size={17} /> }]} />
+      </div>
     </AntLayout.Sider>
     <AntLayout><AntLayout.Content className="main-content"><Outlet /></AntLayout.Content></AntLayout>
   </AntLayout>;

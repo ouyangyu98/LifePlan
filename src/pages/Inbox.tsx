@@ -57,6 +57,7 @@ import { userFacingError } from "@/lib/errors";
 import Modal from "@/components/ui/Modal";
 import EventCategorySelect from "@/components/ui/EventCategorySelect";
 import { track } from "@/lib/analytics";
+import { useFeaturePreferences } from "@/lib/featurePreferences";
 
 const hours = [
   { value: 0.5, label: "30 分钟" },
@@ -105,6 +106,7 @@ const categoryColors = [
 ];
 
 export default function Inbox() {
+  const { features } = useFeaturePreferences();
   const [events, setEvents] = useState<Event[]>([]);
   const [actions, setActions] = useState<Action[]>([]);
   const [categories, setCategories] = useState<EventCategory[]>([]);
@@ -317,7 +319,7 @@ export default function Inbox() {
       if (closeProcessing) setProcessing(null);
       await load();
       message.success(
-        result && result.points_awarded > 0
+        features.rewards && result && result.points_awarded > 0
           ? `事件已完成，全部搞定 +${result.points_awarded} 积分`
           : "事件已完成",
       );
