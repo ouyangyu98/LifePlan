@@ -7,12 +7,13 @@ export const optionalFeatures = [
   { key: "rewards", label: "奖励池" },
   { key: "pomodoro", label: "番茄钟" },
   { key: "insights", label: "心得" },
+  { key: "dailyStatistics", label: "数据统计" },
 ] as const;
 
 export type FeatureKey = typeof optionalFeatures[number]["key"];
 type Features = Record<FeatureKey, boolean>;
 const storageKey = "lifeplan-optional-features-v1";
-const defaults: Features = { workLog: true, templates: true, rewards: true, pomodoro: true, insights: true };
+const defaults: Features = { workLog: true, templates: true, rewards: true, pomodoro: true, insights: true, dailyStatistics: true };
 
 const FeatureContext = createContext<{
   features: Features;

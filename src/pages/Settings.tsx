@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { Alert, Switch, Typography, message } from "antd";
-import { CalendarDays, FileText, Gift, NotebookPen, Timer } from "lucide-react";
+import { CalendarDays, ChartNoAxesCombined, FileText, Gift, NotebookPen, Timer } from "lucide-react";
 import { optionalFeatures, useFeaturePreferences, type FeatureKey } from "@/lib/featurePreferences";
 import { pomodoroApi } from "@/lib/api";
 
-const icons = { workLog: FileText, templates: CalendarDays, rewards: Gift, pomodoro: Timer, insights: NotebookPen };
+const icons = { workLog: FileText, templates: CalendarDays, rewards: Gift, pomodoro: Timer, insights: NotebookPen, dailyStatistics: ChartNoAxesCombined };
 
 export default function Settings() {
   const { features, setFeature } = useFeaturePreferences();

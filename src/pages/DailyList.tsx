@@ -7,6 +7,7 @@ import { actionsApi, dailyScheduleApi, recurringActionsApi } from "@/lib/api";
 import type { Action, DailySchedule, DailyScheduleSlot, DailyTemplateSlot, NewAction, NewRecurringAction, RecurringAction, UpdateRecurringAction } from "@/types";
 import { userFacingError } from "@/lib/errors";
 import WorkLogModal from "@/components/ui/WorkLogModal";
+import DailyStatistics from "@/components/DailyStatistics";
 import { track } from "@/lib/analytics";
 import { sortDailyActions } from "@/lib/dailyActionSort";
 import { useFeaturePreferences } from "@/lib/featurePreferences";
@@ -40,11 +41,24 @@ export default function DailyList() {
   const [workLogOpen, setWorkLogOpen] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const loadVersion = useRef(0);
   const navigate = useNavigate();
   const location = useLocation();
 
-  const load = async () => { setLoading(true); try { const [nextSchedule, allActions, usedDateList] = await Promise.all([dailyScheduleApi.get(date), actionsApi.list(), dailyScheduleApi.usedDates()]); setSchedule(nextSchedule); setActions(allActions); setUsedDates(new Set(usedDateList)); setError(""); } catch (cause) { setError(userFacingError(cause)); } finally { setLoading(false); } };
-  useEffect(() => { void load(); }, [date]);
+  const load = async () => {
+    const version = ++loadVersion.current;
+    setLoading(true);
+    try {
+      const [nextSchedule, allActions, usedDateList] = await Promise.all([dailyScheduleApi.get(date), actionsApi.list(), dailyScheduleApi.usedDates()]);
+      if (version !== loadVersion.current) return;
+      setSchedule(nextSchedule); setActions(allActions); setUsedDates(new Set(usedDateList)); setError("");
+    } catch (cause) {
+      if (version === loadVersion.current) setError(userFacingError(cause));
+    } finally {
+      if (version === loadVersion.current) setLoading(false);
+    }
+  };
+  useEffect(() => { void load(); return () => { loadVersion.current += 1; }; }, [date]);
   useEffect(() => {
     const reviewActionId = (location.state as { reviewActionId?: number } | null)?.reviewActionId;
     if (!reviewActionId || loading || !schedule || date !== today()) return;
@@ -88,6 +102,7 @@ export default function DailyList() {
     <DailySlotModal slot={selectedSlot} onClose={() => setSelectedSlot(null)} onSaved={(slot) => { refreshSlot(slot); setSelectedSlot(slot); }} />
     <TimeSlotModal slot={timeSlot} onClose={() => setTimeSlot(null)} onSaved={async () => { setTimeSlot(null); await load(); }} onDeleted={async () => { setTimeSlot(null); await load(); message.success("时间段已删除"); }} />
     <InsertSlotModal date={date} preset={insertPreset} onClose={() => setInsertPreset(null)} onSaved={async () => { setInsertPreset(null); await load(); message.success("已新增时间段"); }} />
+    {!loading && !error && schedule?.list_date === date && features.dailyStatistics && <DailyStatistics key={date} date={date} slots={slots} />}
     {features.workLog && workLogOpen && <WorkLogModal date={date} slots={slots} onClose={() => setWorkLogOpen(false)} />}
   </div>;
 }

@@ -332,7 +332,7 @@ test("daily calendar marks dates used by Today Tasks", { timeout: 60000 }, async
     assert.ok(positions.every(Boolean), "Markers must sit above the date's upper-right corner");
     if (screenshots) {
       await mkdir(screenshots, { recursive: true });
-      await panel.screenshot({ path: path.join(screenshots, "daily-calendar-corner.png") });
+      await panel.locator(".ant-picker-panel").screenshot({ path: path.join(screenshots, "daily-calendar-corner.png") });
     }
     assert.deepEqual(errors, []);
   } finally {
