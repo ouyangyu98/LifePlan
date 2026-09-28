@@ -48,7 +48,6 @@ import type {
 import { userFacingError } from "@/lib/errors";
 import Modal from "@/components/ui/Modal";
 import { track } from "@/lib/analytics";
-import { sortByPriority } from "@/lib/prioritySort";
 
 const statusLabels: Record<number, string> = {
   0: "未处理",
@@ -200,15 +199,7 @@ export default function Inbox() {
       abandoned: 4,
       completed: 5,
     };
-    const filtered = events.filter((event) => event.status === status[filter]);
-    if (filter !== "events") return filtered;
-    // 进行中事件按 P1、P2、P3、P4 排列；优先级数值越小越靠前。
-    return sortByPriority(
-      filtered.map((event) => ({
-        ...event,
-        priority: 4 - ((event.importance ?? 1) * 2 + (event.urgency ?? 0)),
-      })),
-    );
+    return events.filter((event) => event.status === status[filter]);
   }, [events, filter]);
   const counts = useMemo(
     () => ({
@@ -243,9 +234,6 @@ export default function Inbox() {
   const updateEvent = async (values: {
     title: string;
     target?: string;
-    deadline?: Dayjs;
-    importance?: number;
-    urgency?: number;
   }) => {
     if (!editing) return;
     try {
@@ -253,9 +241,10 @@ export default function Inbox() {
         id: editing.id,
         title: values.title.trim(),
         target: values.target?.trim() || undefined,
-        deadline: toDateString(values.deadline),
-        importance: Number(values.importance ?? 1),
-        urgency: Number(values.urgency ?? 0),
+        // Keep legacy metadata intact without exposing it in the personal workflow.
+        deadline: editing.deadline,
+        importance: editing.importance,
+        urgency: editing.urgency,
       });
       setEditing(null);
       await load();
@@ -465,9 +454,6 @@ export default function Inbox() {
             initialValues={{
               title: editing.title,
               target: editing.target,
-              deadline: editing.deadline ? dayjs(editing.deadline) : undefined,
-              importance: editing.importance ?? 1,
-              urgency: editing.urgency ?? 0,
             }}
             onFinish={(values) => void updateEvent(values)}
           >
@@ -483,27 +469,6 @@ export default function Inbox() {
                 <Form.Item label="事件目标" name="target">
                   <Input.TextArea autoSize={{ minRows: 3, maxRows: 5 }} />
                 </Form.Item>
-                <Form.Item label="截止日期" name="deadline">
-                  <DatePicker className="full-width" format="YYYY-MM-DD" />
-                </Form.Item>
-                <div className="form-grid">
-                  <Form.Item name="importance" label="重要程度">
-                    <Select
-                      options={[
-                        { value: 1, label: "重要" },
-                        { value: 0, label: "不重要" },
-                      ]}
-                    />
-                  </Form.Item>
-                  <Form.Item name="urgency" label="紧急程度">
-                    <Select
-                      options={[
-                        { value: 1, label: "紧急" },
-                        { value: 0, label: "不紧急" },
-                      ]}
-                    />
-                  </Form.Item>
-                </div>
               </>
             )}
             <div className="form-footer">
@@ -633,18 +598,6 @@ function EventRow({
                   <ListChecks size={15} strokeWidth={1.8} aria-hidden="true" />
                   行动 {item.completed_action_count}/{item.action_count}
                 </button>
-                <span className="event-priority-group">
-                  <span
-                    className={`event-priority ${item.importance ? "event-priority-important" : "event-priority-muted"}`}
-                  >
-                    {item.importance ? "重要" : "不重要"}
-                  </span>
-                  <span
-                    className={`event-priority ${item.urgency ? "event-priority-urgent" : "event-priority-muted"}`}
-                  >
-                    {item.urgency ? "紧急" : "不紧急"}
-                  </span>
-                </span>
               </div>
             </div>
             <Space
@@ -1054,11 +1007,6 @@ function EventActionList({
               <span className="action-duration-meta">
                 {formatDuration(action.estimated_hours)}
               </span>
-              {action.deadline && (
-                <span className="action-detail-meta">
-                  截止 {action.deadline}
-                </span>
-              )}
               {action.description && (
                 <span className="action-detail-meta">{action.description}</span>
               )}
@@ -1156,12 +1104,8 @@ function EventActionModal({
             start_date: data.action.start_date
               ? dayjs(data.action.start_date)
               : undefined,
-            deadline: data.action.deadline
-              ? dayjs(data.action.deadline)
-              : undefined,
-            is_frog: data.action.is_frog === 1,
           }
-        : { is_frog: false },
+        : { title: "", description: undefined, estimated_hours: undefined, start_date: undefined },
     );
   }, [data, form]);
   if (!data) return null;
@@ -1171,10 +1115,10 @@ function EventActionModal({
       description: (values.description as string) || undefined,
       estimated_hours: Number(values.estimated_hours || 0),
       start_date: toDateString(values.start_date as Dayjs | string | undefined),
-      deadline: toDateString(values.deadline as Dayjs | string | undefined),
-      is_frog: values.is_frog ? 1 : 0,
-      importance: data.event.importance ?? 1,
-      urgency: data.event.urgency ?? 0,
+      deadline: data.action?.deadline,
+      is_frog: data.action?.is_frog ?? 0,
+      importance: data.action?.importance ?? 0,
+      urgency: data.action?.urgency ?? 0,
     };
     try {
       if (data.action)
@@ -1212,15 +1156,9 @@ function EventActionModal({
           <Form.Item name="start_date" label="开始日期（选填）">
             <DatePicker className="full-width" format="YYYY-MM-DD" />
           </Form.Item>
-          <Form.Item name="deadline" label="截止日期">
-            <DatePicker className="full-width" format="YYYY-MM-DD" />
-          </Form.Item>
         </div>
         <Form.Item name="description" label="描述">
           <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} />
-        </Form.Item>
-        <Form.Item name="is_frog" valuePropName="checked">
-          <Checkbox>标记为青蛙</Checkbox>
         </Form.Item>
         <div className="form-footer">
           <Button onClick={onClose}>取消</Button>
@@ -1257,8 +1195,6 @@ function ProcessModal({
     if (data) {
       const initialEventValues = {
         title: data.event.title,
-        importance: "1",
-        urgency: "0",
       };
       form.setFieldsValue(initialEventValues);
       setEventValues(initialEventValues);
@@ -1338,9 +1274,8 @@ function ProcessModal({
           start_date: toDateString(
             values.start_date as Dayjs | string | undefined,
           ),
-          deadline: toDateString(values.deadline as Dayjs | string | undefined),
-          importance: Number(values.importance),
-          urgency: Number(values.urgency),
+          importance: 0,
+          urgency: 0,
           action_steps: [],
         });
         return;
@@ -1366,12 +1301,8 @@ function ProcessModal({
         (savedEventValues.start_date ?? values.start_date) as
           Dayjs | string | undefined,
       ),
-      deadline: toDateString(
-        (savedEventValues.deadline ?? values.deadline) as
-          Dayjs | string | undefined,
-      ),
-      importance: Number(savedEventValues.importance ?? values.importance),
-      urgency: Number(savedEventValues.urgency ?? values.urgency),
+      importance: 0,
+      urgency: 0,
       action_steps: steps,
       delegated_to: values.delegated_to as string,
       follow_up_date: toDateString(
@@ -1436,25 +1367,6 @@ function ProcessModal({
                     <Input.TextArea
                       placeholder="选填"
                       autoSize={{ minRows: 3, maxRows: 5 }}
-                    />
-                  </Form.Item>
-                  <Form.Item className="full" name="deadline" label="截止日期">
-                    <DatePicker className="full-width" format="YYYY-MM-DD" />
-                  </Form.Item>
-                  <Form.Item name="importance" label="重要程度">
-                    <Select
-                      options={[
-                        { value: "1", label: "重要" },
-                        { value: "0", label: "不重要" },
-                      ]}
-                    />
-                  </Form.Item>
-                  <Form.Item name="urgency" label="紧急程度">
-                    <Select
-                      options={[
-                        { value: "1", label: "紧急" },
-                        { value: "0", label: "不紧急" },
-                      ]}
                     />
                   </Form.Item>
                 </div>

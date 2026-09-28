@@ -228,11 +228,11 @@ pub fn create_action_from_recurring(
 ) -> Result<Action, String> {
     let conn = state.db.lock().map_err(|error| error.to_string())?;
     let space_id = current_space_id(&conn).map_err(|error| error.to_string())?;
-    let template: (String, f64, i32, i32, i32) = conn
+    let template: (String, f64) = conn
         .query_row(
-            "SELECT title, estimated_hours, is_frog, importance, urgency FROM recurring_actions WHERE id = ?1 AND space_id = ?2 AND deleted_at IS NULL",
+            "SELECT title, estimated_hours FROM recurring_actions WHERE id = ?1 AND space_id = ?2 AND deleted_at IS NULL",
             params![recurring_action_id, space_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(|error| error.to_string())?
@@ -241,7 +241,7 @@ pub fn create_action_from_recurring(
     conn.execute(
         "INSERT INTO actions (space_id, sync_id, title, estimated_hours, is_frog, importance, urgency, priority, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
-        params![space_id, new_uuid(), template.0, template.1, template.2, template.3, template.4, calculate_priority(template.3, template.4), timestamp],
+        params![space_id, new_uuid(), template.0, template.1, 0, 0, 0, calculate_priority(0, 0), timestamp],
     )
     .map_err(|error| error.to_string())?;
     let action_id = conn.last_insert_rowid();

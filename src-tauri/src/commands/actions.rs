@@ -51,10 +51,48 @@ fn validate(p: &NewAction) -> Result<(), String> {
     if !valid_hours(p.estimated_hours) {
         return Err("行动耗时必须为空、30 分钟、1 小时、1.5 小时或 2 小时".into());
     }
-    if p.start_date > p.deadline {
-        return Err("截止日期不能早于开始日期".into());
-    }
     Ok(())
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+
+    fn action() -> NewAction {
+        NewAction {
+            event_id: None,
+            title: "Test action".into(),
+            description: None,
+            estimated_hours: 0.5,
+            start_date: Some("2026-09-28".into()),
+            deadline: None,
+            is_frog: 0,
+            importance: 0,
+            urgency: 0,
+        }
+    }
+
+    #[test]
+    fn start_date_does_not_require_deadline() {
+        assert!(validate(&action()).is_ok());
+    }
+
+    #[test]
+    fn legacy_deadline_does_not_block_editing() {
+        let mut value = action();
+        value.deadline = Some("2026-09-01".into());
+        assert!(validate(&value).is_ok());
+    }
+
+    #[test]
+    fn title_and_duration_are_still_validated() {
+        let mut value = action();
+        value.title = " ".into();
+        assert!(validate(&value).is_err());
+        value.title = "Test action".into();
+        value.estimated_hours = 3.0;
+        assert!(validate(&value).is_err());
+    }
 }
 #[tauri::command]
 pub fn get_actions(state: State<'_, AppState>) -> Result<Vec<Action>, String> {

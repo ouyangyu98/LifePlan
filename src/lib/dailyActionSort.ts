@@ -18,10 +18,6 @@ export function sortDailyActions(actions: Action[]): Action[] {
         }
       }
 
-      if (left.action.priority !== right.action.priority) {
-        return left.action.priority - right.action.priority;
-      }
-
       return left.index - right.index;
     })
     .map(({ action }) => action);
