@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import dayjs, { type Dayjs } from "dayjs";
 import { Alert, Button, Checkbox, DatePicker, Empty, Form, Input, InputNumber, Modal as AntModal, Popconfirm, Select, Space, Tag, Tooltip, Dropdown, Typography, Radio, message } from "antd";
-import { ArrowRight, CalendarDays, ChevronDown, ChevronUp, FileText, ListChecks, Pencil, Plus, RotateCcw, ListTree, Rows3 } from "lucide-react";
+import { ArrowRight, CalendarDays, ChevronDown, ChevronUp, FileText, GripVertical, ListChecks, Pencil, Plus, RotateCcw, ListTree, Rows3 } from "lucide-react";
 import { actionsApi, dailyScheduleApi, recurringActionsApi } from "@/lib/api";
 import type { Action, DailySchedule, DailyScheduleSlot, DailyTemplateSlot, NewAction, NewRecurringAction, RecurringAction, UpdateRecurringAction } from "@/types";
 import { userFacingError } from "@/lib/errors";
@@ -11,11 +11,14 @@ import DailyStatistics from "@/components/DailyStatistics";
 import { track } from "@/lib/analytics";
 import { sortDailyActions } from "@/lib/dailyActionSort";
 import { useFeaturePreferences } from "@/lib/featurePreferences";
+import { suggestedEndTime } from "@/lib/dailyScheduleTime";
 
 const today = () => dayjs().format("YYYY-MM-DD");
 const formatTime = (value: string) => value;
 const minutesBetween = (start: string, end: string) => { const [sh, sm] = start.split(":").map(Number); const [eh, em] = end.split(":").map(Number); return (eh * 60 + em) - (sh * 60 + sm); };
 const slotLabel = (slot: DailyScheduleSlot) => `${formatTime(slot.start_time)}-${formatTime(slot.end_time)}`;
+const pickerTime = (value: string) => dayjs("2000-01-01T00:00").add(minutesBetween("00:00", value), "minute");
+const formatPickerTime = (value: Dayjs) => value.isSame(dayjs("2000-01-02"), "day") ? "24:00" : value.format("HH:mm");
 const weekdayNames = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
 const ACTION_VIEW_STORAGE_KEY = "lifeplan-daily-action-picker-view";
 const HALF_HOUR_TIMES = Array.from({ length: 48 }, (_, index) => {
@@ -92,12 +95,12 @@ export default function DailyList() {
       message.success(template.length === 0 ? "已保存空模板" : "已保存模板");
     } catch (cause) { setError(userFacingError(cause)); }
   };
-  const prepareInsertedSlot = (index: number) => { const before = slots[index]; if (!before) return; const startMinutes = minutesBetween("00:00", before.end_time); if (startMinutes + 60 >= 24 * 60) { message.warning("新增时间段的结束时间不能超过次日 00:00"); return; } const endTime = dayjs(`2000-01-01T${before.end_time}`).add(1, "hour").format("HH:mm"); setInsertPreset({ startTime: before.end_time, endTime }); };
+  const prepareInsertedSlot = (index: number) => { const before = slots[index]; if (!before) return; if (before.end_time === "24:00") { message.warning("当天已没有可新增的时间"); return; } setInsertPreset({ startTime: before.end_time, endTime: suggestedEndTime(before.end_time) }); };
 
   return <div className="page daily-list-page">
     <header className="page-header daily-list-header"><div><Typography.Title level={2} className="page-title">今日事</Typography.Title><Typography.Paragraph className="page-subtitle">按时间安排行动，并在右侧独立记录该计划执行情况的复盘。</Typography.Paragraph></div><div className="daily-date-panel">{isToday && <Tag color="blue" className="daily-today-tag">今天</Tag>}<DatePicker value={dayjs(date)} format="YYYY年MM月DD日" allowClear={false} cellRender={(current, info) => { if (info.type !== "date" || !usedDates.has(dayjs(current).format("YYYY-MM-DD"))) return info.originNode; return <div className="daily-date-cell is-used">{info.originNode}<span className="daily-date-used-dot" aria-label="这天使用过今日事" /></div>; }} onChange={(value) => value && setDate(value.format("YYYY-MM-DD"))} /><Typography.Text className="daily-date-context"><span className="daily-weekday-name">{weekdayName}</span></Typography.Text></div></header>
     {error && <Alert className="page-alert" type="error" showIcon message={error} closable onClose={() => setError("")} />}
-    {loading ? <div className="card empty">正在加载…</div> : <>{slots.length === 0 ? <div className="card onboarding-empty"><Empty className="empty" description={<div><Typography.Title level={4}>今天还没有安排行动</Typography.Title><Typography.Paragraph type="secondary">先创建一个时间段，再把要做的行动放进去。</Typography.Paragraph><Space><Button type="primary" icon={<Plus size={15} />} onClick={() => setInsertPreset({})}>新增时间段</Button><Button onClick={() => navigate("/inbox")}>去事件篮记录</Button>{features.templates && <Button onClick={() => void saveTemplate()}>保存空模板</Button>}</Space></div>} /></div> : <ScheduleTable slots={slots} onPlan={setPickerSlot} onReview={(slot) => { if (!slot.action) { message.warning({ content: "请先安排行动", className: "daily-review-toast" }); return; } setSelectedSlot(slot); }} onEditTime={setTimeSlot} onInsert={prepareInsertedSlot} />}<div className="daily-template-action"><div className="daily-template-action-left"><Button type="text" icon={<Plus size={15} />} onClick={() => setInsertPreset({})}>新增时间段</Button>{features.templates && <Tooltip title="只影响尚未创建日程的未来日期，不修改已有日期"><Button type="text" icon={<CalendarDays size={15} />} onClick={() => void saveTemplate()}>保存模板</Button></Tooltip>}</div>{features.workLog && <Button type="text" className="work-log-trigger" icon={<FileText size={15} />} disabled={slots.length === 0} onClick={() => setWorkLogOpen(true)}>工作日志</Button>}</div></>}
+    {loading ? <div className="card empty">正在加载…</div> : <>{slots.length === 0 ? <div className="card onboarding-empty"><Empty className="empty" description={<div><Typography.Title level={4}>今天还没有安排行动</Typography.Title><Typography.Paragraph type="secondary">先创建一个时间段，再把要做的行动放进去。</Typography.Paragraph><Space><Button type="primary" icon={<Plus size={15} />} onClick={() => setInsertPreset({})}>新增时间段</Button><Button onClick={() => navigate("/inbox")}>去事件篮记录</Button>{features.templates && <Button onClick={() => void saveTemplate()}>保存空模板</Button>}</Space></div>} /></div> : <ScheduleTable key={date} slots={slots} onPlan={setPickerSlot} onReview={(slot) => { if (!slot.action) { message.warning({ content: "请先安排行动", className: "daily-review-toast" }); return; } setSelectedSlot(slot); }} onEditTime={setTimeSlot} onInsert={prepareInsertedSlot} onMoved={(updated) => setSchedule((current) => current?.list_date === date ? { ...current, slots: current.slots.map((slot) => updated.find((item) => item.id === slot.id) ?? slot) } : current)} />}<div className="daily-template-action"><div className="daily-template-action-left"><Button type="text" icon={<Plus size={15} />} onClick={() => setInsertPreset({})}>新增时间段</Button>{features.templates && <Tooltip title="只影响尚未创建日程的未来日期，不修改已有日期"><Button type="text" icon={<CalendarDays size={15} />} onClick={() => void saveTemplate()}>保存模板</Button></Tooltip>}</div>{features.workLog && <Button type="text" className="work-log-trigger" icon={<FileText size={15} />} disabled={slots.length === 0} onClick={() => setWorkLogOpen(true)}>工作日志</Button>}</div></>}
     <ActionPickerModal slot={pickerSlot} slots={slots} actions={pendingActions} onGuideToInbox={() => navigate("/inbox", { state: { guideNewEvent: true } })} onClose={() => setPickerSlot(null)} onStartPomodoro={(action) => { const minutes = Math.max(30, Math.ceil((action.estimated_hours || 0.5) * 60 / 30) * 30); sessionStorage.setItem("lifeplan-pomodoro-prefill", JSON.stringify({ actionId: action.id, plannedSeconds: minutes * 60 })); setPickerSlot(null); navigate("/pomodoro"); }} onAssigned={(assignedSlots) => { setSchedule((current) => current ? { ...current, slots: current.slots.map((item) => assignedSlots.find((assigned) => assigned.id === item.id) ?? item) } : current); setPickerSlot(null); }} />
     <DailySlotModal slot={selectedSlot} onClose={() => setSelectedSlot(null)} onSaved={(slot) => { refreshSlot(slot); setSelectedSlot(slot); }} />
     <TimeSlotModal slot={timeSlot} onClose={() => setTimeSlot(null)} onSaved={async () => { setTimeSlot(null); await load(); }} onDeleted={async () => { setTimeSlot(null); await load(); message.success("时间段已删除"); }} />
@@ -107,13 +110,80 @@ export default function DailyList() {
   </div>;
 }
 
-function ScheduleTable({ slots, onPlan, onReview, onEditTime, onInsert }: { slots: DailyScheduleSlot[]; onPlan: (slot: DailyScheduleSlot) => void; onReview: (slot: DailyScheduleSlot) => void; onEditTime: (slot: DailyScheduleSlot) => void; onInsert: (index: number) => void }) {
-  return <div className="daily-schedule-card card"><div className="daily-schedule-head"><div>时间段</div><div>安排行动</div><div>复盘</div></div><div className="daily-schedule-body">{slots.map((slot, index) => <div className="daily-schedule-row-wrap" key={slot.id}><div className="daily-schedule-row"><div className="daily-time-cell" role="button" tabIndex={0} onClick={() => onEditTime(slot)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onEditTime(slot); }}>{slotLabel(slot)}{index < slots.length - 1 && <button className="daily-insert-button" type="button" aria-label="插入时间段" title="插入时间段" onClick={(event) => { event.stopPropagation(); onInsert(index); }}><span className="daily-insert-plus"><Plus size={14} /></span></button>}</div><PlanCell slot={slot} onClick={() => onPlan(slot)} /><ReviewCell slot={slot} onClick={() => onReview(slot)} /></div></div>)}</div></div>;
+function ScheduleTable({ slots, onPlan, onReview, onEditTime, onInsert, onMoved }: {
+  slots: DailyScheduleSlot[];
+  onPlan: (slot: DailyScheduleSlot) => void;
+  onReview: (slot: DailyScheduleSlot) => void;
+  onEditTime: (slot: DailyScheduleSlot) => void;
+  onInsert: (index: number) => void;
+  onMoved: (slots: DailyScheduleSlot[]) => void;
+}) {
+  const [draggedId, setDraggedId] = useState<number | null>(null);
+  const [targetId, setTargetId] = useState<number | null>(null);
+  const [moving, setMoving] = useState(false);
+  const busy = useRef(false);
+  const clearDrag = () => { setDraggedId(null); setTargetId(null); };
+  const move = async (sourceId: number, destinationId: number) => {
+    const source = slots.find((slot) => slot.id === sourceId);
+    if (busy.current || !source?.action || sourceId === destinationId) return;
+    busy.current = true;
+    setMoving(true);
+    clearDrag();
+    try {
+      const updated = await dailyScheduleApi.moveAction(source.list_date, sourceId, destinationId);
+      onMoved(updated);
+      message.success("安排已调整");
+    } catch (cause) {
+      message.error(userFacingError(cause));
+    } finally {
+      busy.current = false;
+      setMoving(false);
+    }
+  };
+  const startDrag = (event: DragEvent<HTMLButtonElement>, slot: DailyScheduleSlot) => {
+    if (busy.current || !slot.action) { event.preventDefault(); return; }
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("application/x-lifeplan-slot", String(slot.id));
+    setDraggedId(slot.id);
+  };
+  return <div className={`daily-schedule-card card${moving ? " is-moving" : ""}`} aria-busy={moving}>
+    <div className="daily-schedule-head"><div>时间段</div><div>安排行动</div><div>复盘</div></div>
+    <div className="daily-schedule-body">{slots.map((slot, index) => <div className="daily-schedule-row-wrap" key={slot.id}>
+      <div className={`daily-schedule-row${draggedId === slot.id ? " is-dragging" : ""}${targetId === slot.id ? " is-drop-target" : ""}`}
+        onDragOver={(event) => {
+          if (draggedId === null || draggedId === slot.id || busy.current) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          setTargetId(slot.id);
+        }}
+        onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setTargetId(null); }}
+        onDrop={(event) => {
+          if (draggedId === null) return;
+          event.preventDefault();
+          const sourceId = draggedId;
+          clearDrag();
+          void move(sourceId, slot.id);
+        }}>
+        <div className="daily-time-cell" role="button" tabIndex={moving ? -1 : 0} aria-disabled={moving}
+          onClick={() => { if (!busy.current) onEditTime(slot); }}
+          onKeyDown={(event) => { if (!busy.current && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onEditTime(slot); } }}>
+          {slotLabel(slot)}
+          {index < slots.length - 1 && <button className="daily-insert-button" type="button" aria-label="插入时间段" title="插入时间段" disabled={moving}
+            onClick={(event) => { event.stopPropagation(); if (!busy.current) onInsert(index); }}><span className="daily-insert-plus"><Plus size={14} /></span></button>}
+        </div>
+        <PlanCell slot={slot} disabled={moving} onClick={() => { if (!busy.current) onPlan(slot); }} onDragStart={(event) => startDrag(event, slot)} onDragEnd={clearDrag} />
+        <ReviewCell slot={slot} onClick={() => { if (!busy.current) onReview(slot); }} />
+      </div>
+    </div>)}</div>
+  </div>;
 }
 
-function PlanCell({ slot, onClick }: { slot: DailyScheduleSlot; onClick: () => void }) {
+function PlanCell({ slot, onClick, disabled, onDragStart, onDragEnd }: {
+  slot: DailyScheduleSlot; onClick: () => void; disabled: boolean;
+  onDragStart: (event: DragEvent<HTMLButtonElement>) => void; onDragEnd: () => void;
+}) {
   const action = slot.action; const statusClass = !action ? "empty" : action.status === 1 ? "completed" : action.status === 2 ? "abandoned" : "pending";
-  return <button type="button" className={`daily-plan-cell daily-cell-button ${statusClass}`} onClick={onClick}>{action ? <span className={`daily-inline-title ${action.status === 1 ? "completed-title" : ""}`}>{action.title}</span> : <span className="daily-empty-action">+ 点击安排行动</span>}</button>;
+  return <button type="button" className={`daily-plan-cell daily-cell-button ${statusClass}`} disabled={disabled} draggable={Boolean(action) && !disabled} onDragStart={onDragStart} onDragEnd={onDragEnd} onClick={onClick}>{action ? <><span className="daily-drag-handle" title="拖动到其他时间段"><GripVertical size={14} aria-hidden="true" /></span><span className={`daily-inline-title ${action.status === 1 ? "completed-title" : ""}`}>{action.title}</span></> : <span className="daily-empty-action">+ 点击安排行动</span>}</button>;
 }
 
 function ReviewCell({ slot, onClick }: { slot: DailyScheduleSlot; onClick: () => void }) {
@@ -121,11 +191,12 @@ function ReviewCell({ slot, onClick }: { slot: DailyScheduleSlot; onClick: () =>
   return <button type="button" className={`daily-review-cell daily-cell-button ${reviewed ? "reviewed" : "empty"}`} onClick={onClick}>{reviewed ? <><span className="daily-inline-tags"><Tag color={slot.met_expectation === 1 ? "green" : "red"}>{slot.met_expectation === 1 ? "达到预期" : "未达预期"}</Tag><Tag color={slot.focused === 1 ? "blue" : "red"}>{slot.focused === 1 ? "专注" : "未专注"}</Tag></span><span className="daily-review-summary">{slot.actual_notes}</span></> : <span className="daily-review-placeholder">添加复盘</span>}</button>;
 }
 
-function HalfHourTimePicker({ value, onChange, className }: { value?: Dayjs; onChange?: (value: Dayjs | null) => void; className?: string }) {
+function HalfHourTimePicker({ value, onChange, className, allowDayEnd = false }: { value?: Dayjs; onChange?: (value: Dayjs | null) => void; className?: string; allowDayEnd?: boolean }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const currentTime = value?.format("HH:mm");
+  const currentTime = value ? formatPickerTime(value) : undefined;
+  const times = allowDayEnd ? [...HALF_HOUR_TIMES, "24:00"] : HALF_HOUR_TIMES;
   useEffect(() => {
     if (!open || !currentTime) return;
     const frame = requestAnimationFrame(() => {
@@ -135,20 +206,22 @@ function HalfHourTimePicker({ value, onChange, className }: { value?: Dayjs; onC
     return () => cancelAnimationFrame(frame);
   }, [open, currentTime]);
   const selectTime = (time: string) => {
-    onChange?.(dayjs(`2000-01-01T${time}`));
+    onChange?.(pickerTime(time));
     setOpen(false);
     requestAnimationFrame(() => triggerRef.current?.focus());
   };
   const selectNow = () => selectTime(toHalfHourTime(dayjs()));
-  return <Dropdown open={open} onOpenChange={setOpen} trigger={["click"]} placement="bottomLeft" popupRender={() => <div className="daily-time-picker-panel"><div ref={listRef} className="daily-time-picker-list" role="listbox" aria-label="时间选项">{HALF_HOUR_TIMES.map((time) => <button key={time} data-time={time} type="button" role="option" aria-selected={time === currentTime} className={`daily-time-picker-option ${time === currentTime ? "selected" : ""}`} onClick={() => selectTime(time)}>{time}</button>)}</div><div className="daily-time-picker-footer"><Button type="link" size="small" onClick={selectNow}>此刻</Button></div></div>}><button ref={triggerRef} type="button" className={`daily-time-picker-trigger ${className ?? ""}`} aria-haspopup="listbox" aria-expanded={open}>{currentTime ?? "请选择时间"}</button></Dropdown>;
+  return <Dropdown open={open} onOpenChange={setOpen} trigger={["click"]} placement="bottomLeft" popupRender={() => <div className="daily-time-picker-panel"><div ref={listRef} className="daily-time-picker-list" role="listbox" aria-label="时间选项">{times.map((time) => <button key={time} data-time={time} type="button" role="option" aria-selected={time === currentTime} className={`daily-time-picker-option ${time === currentTime ? "selected" : ""}`} onClick={() => selectTime(time)}>{time}</button>)}</div><div className="daily-time-picker-footer"><Button type="link" size="small" onClick={selectNow}>此刻</Button></div></div>}><button ref={triggerRef} type="button" className={`daily-time-picker-trigger ${className ?? ""}`} aria-haspopup="listbox" aria-expanded={open}>{currentTime ?? "请选择时间"}</button></Dropdown>;
 }
 
 function InsertSlotModal({ date, preset, onClose, onSaved }: { date: string; preset: { startTime?: string; endTime?: string } | null; onClose: () => void; onSaved: () => Promise<void> }) {
   const [form] = Form.useForm(); const [saving, setSaving] = useState(false);
-  useEffect(() => { if (!preset) return; form.resetFields(); if (preset.startTime && preset.endTime) form.setFieldsValue({ start_time: dayjs(`2000-01-01T${preset.startTime}`), end_time: dayjs(`2000-01-01T${preset.endTime}`) }); }, [preset, form]);
+  useEffect(() => { if (!preset) return; form.resetFields(); if (preset.startTime && preset.endTime) form.setFieldsValue({ start_time: pickerTime(preset.startTime), end_time: pickerTime(preset.endTime) }); }, [preset, form]);
   if (!preset) return null;
-  const submit = async (values: Record<string, unknown>) => { const startTime = (values.start_time as Dayjs).format("HH:mm"); const endTime = (values.end_time as Dayjs).format("HH:mm"); if (minutesBetween(startTime, endTime) <= 0) { message.error("结束时间必须晚于开始时间，且不能超过次日 00:00"); return; } setSaving(true); try { await dailyScheduleApi.createSlot({ list_date: date, start_time: startTime, end_time: endTime }); await onSaved(); } catch (cause) { message.error(userFacingError(cause)); } finally { setSaving(false); } };
-  return <AntModal open title="新增时间段" onCancel={onClose} footer={null} destroyOnHidden><Form form={form} className="form" layout="vertical" onFinish={(values) => void submit(values)}><div className="form-grid"><Form.Item name="start_time" label="开始时间" rules={[{ required: true }]}><HalfHourTimePicker className="full-width" /></Form.Item><Form.Item name="end_time" label="结束时间" rules={[{ required: true }]}><HalfHourTimePicker className="full-width" /></Form.Item></div><div className="form-footer"><Button onClick={onClose}>取消</Button><Button type="primary" htmlType="submit" loading={saving}>保存时间段</Button></div></Form></AntModal>;
+  const submit = async (values: Record<string, unknown>) => { const startTime = formatPickerTime(values.start_time as Dayjs); const endTime = formatPickerTime(values.end_time as Dayjs); if (minutesBetween(startTime, endTime) <= 0) { message.error("结束时间必须晚于开始时间，且不能超过次日 00:00"); return; } setSaving(true); try { await dailyScheduleApi.createSlot({ list_date: date, start_time: startTime, end_time: endTime }); await onSaved(); } catch (cause) { message.error(userFacingError(cause)); } finally { setSaving(false); } };
+  return <AntModal open title="新增时间段" onCancel={onClose} footer={null} destroyOnHidden><Form form={form} className="form" layout="vertical" onValuesChange={(changed) => {
+    if (changed.start_time) form.setFieldsValue({ end_time: pickerTime(suggestedEndTime(formatPickerTime(changed.start_time))) });
+  }} onFinish={(values) => void submit(values)}><div className="form-grid"><Form.Item name="start_time" label="开始时间" rules={[{ required: true }]}><HalfHourTimePicker className="full-width" /></Form.Item><Form.Item name="end_time" label="结束时间" rules={[{ required: true }]}><HalfHourTimePicker className="full-width" allowDayEnd /></Form.Item></div><div className="form-footer"><Button onClick={onClose}>取消</Button><Button type="primary" htmlType="submit" loading={saving}>保存时间段</Button></div></Form></AntModal>;
 }
 
 function TimeSlotModal({ slot, onClose, onSaved, onDeleted }: { slot: DailyScheduleSlot | null; onClose: () => void; onSaved: () => Promise<void>; onDeleted: () => Promise<void> }) {
@@ -156,14 +229,14 @@ function TimeSlotModal({ slot, onClose, onSaved, onDeleted }: { slot: DailySched
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (slot) form.setFieldsValue({ start_time: dayjs(`2000-01-01T${slot.start_time}`), end_time: dayjs(`2000-01-01T${slot.end_time}`) });
+    if (slot) form.setFieldsValue({ start_time: pickerTime(slot.start_time), end_time: pickerTime(slot.end_time) });
   }, [slot, form]);
   if (!slot) return null;
 
   const submit = async (values: Record<string, unknown>) => {
     setSaving(true);
     try {
-      await dailyScheduleApi.updateSlot({ id: slot.id, start_time: (values.start_time as Dayjs).format("HH:mm"), end_time: (values.end_time as Dayjs).format("HH:mm") });
+      await dailyScheduleApi.updateSlot({ id: slot.id, start_time: formatPickerTime(values.start_time as Dayjs), end_time: formatPickerTime(values.end_time as Dayjs) });
       await onSaved();
       message.success("时间段已更新");
     } catch (cause) {
@@ -198,7 +271,7 @@ function TimeSlotModal({ slot, onClose, onSaved, onDeleted }: { slot: DailySched
     }
   };
 
-  return <AntModal open title={`编辑时间段 · ${slotLabel(slot)}`} onCancel={onClose} footer={null} destroyOnHidden><Form form={form} className="form" layout="vertical" onFinish={(values) => void submit(values)}><div className="form-grid"><Form.Item name="start_time" label="开始时间" rules={[{ required: true, message: "请选择开始时间" }]}><HalfHourTimePicker className="full-width" /></Form.Item><Form.Item name="end_time" label="结束时间" dependencies={["start_time"]} rules={[{ required: true, message: "请选择结束时间" }, ({ getFieldValue }) => ({ validator(_, value) { const start = getFieldValue("start_time") as Dayjs | undefined; if (!value || !start || value.isAfter(start)) return Promise.resolve(); return Promise.reject(new Error("结束时间必须晚于开始时间")); } })]}><HalfHourTimePicker className="full-width" /></Form.Item></div><div className="form-footer">{slot.action_id ? <Button danger disabled title="请先移除已安排的行动">删除</Button> : <Popconfirm title="确定删除这个时间段吗？" onConfirm={() => void remove()} okText="删除" cancelText="取消"><Button danger loading={saving}>删除</Button></Popconfirm>}{minutesBetween(slot.start_time, slot.end_time) > 30 && <Button onClick={() => void split()} loading={saving}>拆分</Button>}<Button type="primary" htmlType="submit" loading={saving}>保存</Button></div></Form></AntModal>;
+  return <AntModal open title={`编辑时间段 · ${slotLabel(slot)}`} onCancel={onClose} footer={null} destroyOnHidden><Form form={form} className="form" layout="vertical" onFinish={(values) => void submit(values)}><div className="form-grid"><Form.Item name="start_time" label="开始时间" rules={[{ required: true, message: "请选择开始时间" }]}><HalfHourTimePicker className="full-width" /></Form.Item><Form.Item name="end_time" label="结束时间" dependencies={["start_time"]} rules={[{ required: true, message: "请选择结束时间" }, ({ getFieldValue }) => ({ validator(_, value) { const start = getFieldValue("start_time") as Dayjs | undefined; if (!value || !start || value.isAfter(start)) return Promise.resolve(); return Promise.reject(new Error("结束时间必须晚于开始时间")); } })]}><HalfHourTimePicker className="full-width" allowDayEnd /></Form.Item></div><div className="form-footer">{slot.action_id ? <Button danger disabled title="请先移除已安排的行动">删除</Button> : <Popconfirm title="确定删除这个时间段吗？" onConfirm={() => void remove()} okText="删除" cancelText="取消"><Button danger loading={saving}>删除</Button></Popconfirm>}{minutesBetween(slot.start_time, slot.end_time) > 30 && <Button onClick={() => void split()} loading={saving}>拆分</Button>}<Button type="primary" htmlType="submit" loading={saving}>保存</Button></div></Form></AntModal>;
 }
 
 function ActionPickerModal({ slot, slots, actions, onGuideToInbox, onClose, onStartPomodoro, onAssigned }: { slot: DailyScheduleSlot | null; slots: DailyScheduleSlot[]; actions: Action[]; onGuideToInbox: () => void; onClose: () => void; onStartPomodoro: (action: Action) => void; onAssigned: (slots: DailyScheduleSlot[]) => void }) {

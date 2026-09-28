@@ -282,3 +282,103 @@ fn used_dates_include_plans_and_reviews_but_not_empty_schedule_days() {
         vec!["2026-09-26", "2026-09-27", "2026-09-28"]
     );
 }
+
+fn drag_state() -> AppState {
+    let state = state();
+    {
+        let conn = state.db.lock().unwrap();
+        let space = current_space_id(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO actions (id,space_id,sync_id,title,status,created_at,updated_at)
+             VALUES (101,?1,'drag-a','First',0,1,1),(102,?1,'drag-b','Second',1,1,1)",
+            [&space],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO daily_schedule_slots
+             (id,space_id,list_date,start_time,end_time,action_id,actual_notes,met_expectation,focused,created_at,updated_at)
+             VALUES (201,?1,'2026-09-28','09:00','10:00',101,'First review',1,0,1,1),
+                    (202,?1,'2026-09-28','10:00','11:30',102,'Second review',0,1,1,1),
+                    (203,?1,'2026-09-28','13:00','14:00',NULL,NULL,NULL,NULL,1,1),
+                    (204,?1,'2026-09-29','09:00','10:00',NULL,NULL,NULL,NULL,1,1)",
+            [&space],
+        ).unwrap();
+    }
+    state
+}
+
+fn drag_snapshot(state: &AppState) -> serde_json::Value {
+    serde_json::to_value(daily_schedule::slot_query(&state.db.lock().unwrap(), "2026-09-28").unwrap()).unwrap()
+}
+
+#[test]
+fn drag_swaps_actions_and_all_review_fields_without_changing_times_or_statuses() {
+    let state = drag_state();
+    let updated = daily_schedule::move_slot_action_impl(&state, "2026-09-28", 201, 202).unwrap();
+    assert_eq!(updated.len(), 2);
+    assert_eq!(updated[0].action_id, Some(102));
+    assert_eq!(updated[0].actual_notes.as_deref(), Some("Second review"));
+    assert_eq!(updated[0].met_expectation, Some(0));
+    assert_eq!(updated[0].focused, Some(1));
+    assert_eq!(updated[0].action.as_ref().unwrap().status, 1);
+    assert_eq!(updated[0].start_time, "09:00");
+    assert_eq!(updated[0].end_time, "10:00");
+    assert_eq!(updated[1].action_id, Some(101));
+    assert_eq!(updated[1].actual_notes.as_deref(), Some("First review"));
+    assert_eq!(updated[1].met_expectation, Some(1));
+    assert_eq!(updated[1].focused, Some(0));
+    assert_eq!(updated[1].action.as_ref().unwrap().status, 0);
+    assert_eq!(updated[1].start_time, "10:00");
+    assert_eq!(updated[1].end_time, "11:30");
+}
+
+#[test]
+fn drag_to_empty_slot_clears_source_and_preserves_existing_orphan_reviews() {
+    let state = drag_state();
+    let updated = daily_schedule::move_slot_action_impl(&state, "2026-09-28", 201, 203).unwrap();
+    assert_eq!(updated[0].action_id, None);
+    assert_eq!(updated[0].actual_notes, None);
+    assert_eq!(updated[0].met_expectation, None);
+    assert_eq!(updated[0].focused, None);
+    assert_eq!(updated[1].action_id, Some(101));
+    assert_eq!(updated[1].actual_notes.as_deref(), Some("First review"));
+    state.db.lock().unwrap().execute(
+        "UPDATE daily_schedule_slots SET actual_notes='Historical review' WHERE id=201", [],
+    ).unwrap();
+    let updated = daily_schedule::move_slot_action_impl(&state, "2026-09-28", 203, 201).unwrap();
+    assert_eq!(updated[0].action_id, Some(101));
+    assert_eq!(updated[0].actual_notes.as_deref(), Some("First review"));
+    assert_eq!(updated[1].action_id, None);
+    assert_eq!(updated[1].actual_notes.as_deref(), Some("Historical review"));
+}
+
+#[test]
+fn drag_rejects_same_empty_missing_cross_date_and_other_space_slots() {
+    let state = drag_state();
+    let before = drag_snapshot(&state);
+    for (source, target) in [(201, 201), (203, 201), (999, 201), (201, 999), (201, 204)] {
+        assert!(daily_schedule::move_slot_action_impl(&state, "2026-09-28", source, target).is_err());
+        assert_eq!(drag_snapshot(&state), before);
+    }
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute("INSERT INTO local_spaces (space_id,created_at,updated_at) VALUES ('other',1,1)", []).unwrap();
+        conn.execute("UPDATE daily_schedule_slots SET space_id='other' WHERE id=202", []).unwrap();
+    }
+    let before = drag_snapshot(&state);
+    assert!(daily_schedule::move_slot_action_impl(&state, "2026-09-28", 201, 202).is_err());
+    assert_eq!(drag_snapshot(&state), before);
+    state.db.lock().unwrap().execute("UPDATE actions SET deleted_at=1 WHERE id=101", []).unwrap();
+    assert!(daily_schedule::move_slot_action_impl(&state, "2026-09-28", 201, 203).is_err());
+}
+
+#[test]
+fn drag_rolls_back_first_write_when_second_write_fails() {
+    let state = drag_state();
+    let before = drag_snapshot(&state);
+    state.db.lock().unwrap().execute_batch(
+        "CREATE TRIGGER fail_second_drag_write BEFORE UPDATE ON daily_schedule_slots
+         WHEN OLD.id=202 BEGIN SELECT RAISE(ABORT,'Simulated write failure'); END;",
+    ).unwrap();
+    assert!(daily_schedule::move_slot_action_impl(&state, "2026-09-28", 201, 202).is_err());
+    assert_eq!(drag_snapshot(&state), before);
+}

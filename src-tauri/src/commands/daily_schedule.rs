@@ -28,7 +28,10 @@ fn valid_date(value: &str) -> bool {
         && value.as_bytes().get(7) == Some(&b'-')
 }
 fn time_minutes(value: &str) -> Option<i32> {
-    if value.len() != 5 || value.as_bytes().get(2) != Some(&b':') {
+    if value == "24:00" {
+        return Some(1440);
+    }
+    if !value.is_ascii() || value.len() != 5 || value.as_bytes().get(2) != Some(&b':') {
         return None;
     }
     let hour = value[0..2].parse::<i32>().ok()?;
@@ -48,6 +51,23 @@ fn validate_range(start: &str, end: &str) -> Result<(), String> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod time_tests {
+    use super::{time_minutes, validate_range};
+
+    #[test]
+    fn midnight_is_allowed_only_as_the_end_of_the_day() {
+        assert!(validate_range("23:00", "24:00").is_ok());
+        assert!(validate_range("23:30", "24:00").is_ok());
+        for (start, end) in [("24:00", "24:00"), ("24:00", "00:30"), ("23:30", "00:30"), ("23:00", "24:30")] {
+            assert!(validate_range(start, end).is_err());
+        }
+        assert_eq!(time_minutes("24:00"), Some(1440));
+        assert_eq!(time_minutes("日:00"), None);
+    }
+}
+
 fn validate_date(value: &str) -> Result<(), String> {
     if valid_date(value) {
         Ok(())
@@ -406,6 +426,59 @@ pub fn assign_daily_slot_action(
         .find(|slot| slot.id == slot_id)
         .ok_or_else(|| "更新行动后读取失败".into())
 }
+
+#[tauri::command]
+pub fn move_daily_slot_action(
+    state: State<'_, AppState>,
+    list_date: String,
+    source_slot_id: i64,
+    target_slot_id: i64,
+) -> Result<Vec<DailyScheduleSlot>, String> {
+    move_slot_action_impl(&state, &list_date, source_slot_id, target_slot_id)
+}
+
+pub(super) fn move_slot_action_impl(
+    state: &AppState,
+    list_date: &str,
+    source_slot_id: i64,
+    target_slot_id: i64,
+) -> Result<Vec<DailyScheduleSlot>, String> {
+    validate_date(list_date)?;
+    if source_slot_id == target_slot_id {
+        return Err("请选择另一个时间段".into());
+    }
+    let mut conn = state.db.lock().map_err(|error| error.to_string())?;
+    let tx = conn.transaction().map_err(|error| error.to_string())?;
+    let space_id = current_space_id(&tx).map_err(|error| error.to_string())?;
+    let slots = slot_query(&tx, list_date).map_err(|error| error.to_string())?;
+    let source = slots.iter().find(|slot| slot.id == source_slot_id).ok_or("来源时间段不存在")?;
+    let target = slots.iter().find(|slot| slot.id == target_slot_id).ok_or("目标时间段不存在")?;
+    if source.action.is_none() {
+        return Err("来源时间段没有可移动的行动".into());
+    }
+    if target.action_id.is_some() && target.action.is_none() {
+        return Err("目标行动已发生变化，请刷新后重试".into());
+    }
+    let timestamp = now_millis();
+    // Move the review with its action; commit both slots together or neither.
+    for (destination, content) in [(source, target), (target, source)] {
+        let changed = tx.execute(
+            "UPDATE daily_schedule_slots
+             SET action_id=?1, actual_notes=?2, met_expectation=?3, focused=?4, updated_at=?5
+             WHERE id=?6 AND space_id=?7 AND list_date=?8",
+            params![content.action_id, content.actual_notes, content.met_expectation, content.focused,
+                    timestamp, destination.id, space_id, list_date],
+        ).map_err(|error| error.to_string())?;
+        if changed != 1 {
+            return Err("时间段已发生变化，请刷新后重试".into());
+        }
+    }
+    let updated = slot_query(&tx, list_date).map_err(|error| error.to_string())?
+        .into_iter().filter(|slot| slot.id == source_slot_id || slot.id == target_slot_id).collect();
+    tx.commit().map_err(|error| error.to_string())?;
+    Ok(updated)
+}
+
 #[tauri::command]
 pub fn update_daily_slot_review(
     state: State<'_, AppState>,

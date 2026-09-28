@@ -1,6 +1,7 @@
 .app-shell { height: 100vh; padding-top: 32px; box-sizing: border-box; background: #f5f7fa; }
 .custom-titlebar { position: fixed; z-index: 10; top: 0; right: 0; left: 0; display: flex; height: 32px; align-items: stretch; justify-content: flex-end; background: #fff; }
 .custom-titlebar-drag { flex: 1; cursor: default; }
+.macos-window-frame .custom-titlebar-drag { margin-left: 84px; }
 .custom-titlebar-controls { display: flex; height: 32px; }
 .custom-titlebar-controls button { display: grid; width: 46px; height: 32px; place-items: center; padding: 0; border: 0; color: #596579; background: transparent; cursor: pointer; }
 .custom-titlebar-controls button:hover { background: #edf3fb; }
@@ -115,6 +116,14 @@ body.pomodoro-floating-mode .app-shell { padding-top: 0; }
 .daily-cell-button { display: flex; box-sizing: border-box; align-items: center; min-width: 0; height: 40px; min-height: 0; margin: 0; padding: 0 10px; border: 0; border-right: 1px solid #f0f0f0; border-bottom: 1px solid #f0f0f0; background: transparent; line-height: 20px; text-align: left; cursor: pointer; overflow: hidden; }
 .daily-cell-button:hover { filter: brightness(.985); }
 .daily-plan-cell.pending { background: #fff; }
+.daily-plan-cell[draggable="true"] { cursor: grab; }
+.daily-drag-handle { display: inline-flex; flex: none; align-items: center; color: #98a3af; opacity: .55; }
+.daily-plan-cell:hover .daily-drag-handle { opacity: 1; }
+.daily-schedule-row.is-dragging { opacity: .45; }
+.daily-schedule-row.is-drop-target > * { background-color: #e6f4ff; }
+.daily-schedule-row.is-drop-target { outline: 2px solid #1677ff; outline-offset: -2px; }
+.daily-schedule-card.is-moving { cursor: progress; }
+.daily-schedule-card.is-moving .daily-plan-cell { cursor: progress; }
 .daily-plan-cell.completed { background: #f6ffed; }
 .daily-plan-cell.abandoned { background: #fafafa; }
 .daily-plan-cell.empty { justify-content: center; padding: 5px 2px; color: #1778ff; }

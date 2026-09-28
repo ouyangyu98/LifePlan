@@ -194,6 +194,7 @@ pub fn run() {
             daily_schedule::split_daily_slot,
             daily_schedule::delete_daily_slot,
             daily_schedule::assign_daily_slot_action,
+            daily_schedule::move_daily_slot_action,
             daily_schedule::update_daily_slot_review,
             daily_schedule::get_daily_template,
             daily_schedule::save_daily_template,

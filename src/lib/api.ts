@@ -78,6 +78,7 @@ export const dailyScheduleApi = {
   deleteSlot: (listDate: string, slotId: number) => invokeCommand<void>("delete_daily_slot", { listDate, slotId }),
   splitSlot: (listDate: string, slotId: number) => invokeCommand<DailyScheduleSlot[]>("split_daily_slot", { listDate, slotId }),
   assignAction: (slotId: number, actionId?: number) => invokeCommand<DailyScheduleSlot>("assign_daily_slot_action", { slotId, actionId: actionId ?? null }),
+  moveAction: (listDate: string, sourceSlotId: number, targetSlotId: number) => invokeCommand<DailyScheduleSlot[]>("move_daily_slot_action", { listDate, sourceSlotId, targetSlotId }),
   updateReview: (payload: UpdateDailySlotReview) => invokeCommand<DailyScheduleSlot>("update_daily_slot_review", { payload }),
   template: () => invokeCommand<DailyTemplateSlot[]>("get_daily_template"),
   saveTemplate: (slots: DailyTemplateSlot[]) => invokeCommand<DailyTemplateSlot[]>("save_daily_template", { slots }),

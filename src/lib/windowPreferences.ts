@@ -1,4 +1,5 @@
 export type SavedWindowGeometry = { width: number; height: number; x: number; y: number };
+export const usesMacWindowFrame = () => typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 const WINDOW_GEOMETRY_KEY = "lifeplan:window-geometry";
 const FLOATING_POSITION_KEY = "lifeplan:pomodoro-floating-position";
 const FLOATING_SIZE_KEY = "lifeplan:pomodoro-floating-size";
@@ -14,6 +15,5 @@ export const loadFloatingSize = () => read<{ width: number; height: number }>(FL
 export const saveFloatingSize = (size: { width: number; height: number }) => write(FLOATING_SIZE_KEY, size);
 export const isFloatingModeSaved = () => floatingMode || read<boolean>(FLOATING_MODE_KEY) === true;
 export const saveFloatingMode = (floating: boolean) => { floatingMode = floating; write(FLOATING_MODE_KEY, floating); };
-
 
 

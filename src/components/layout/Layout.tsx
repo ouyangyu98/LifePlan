@@ -1,6 +1,6 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { availableMonitors, getCurrentWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
-import { isFloatingModeSaved, loadWindowGeometry, saveWindowGeometry } from "@/lib/windowPreferences";
+import { isFloatingModeSaved, loadWindowGeometry, saveWindowGeometry, usesMacWindowFrame } from "@/lib/windowPreferences";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { Archive, CalendarCheck, ArrowDown, Gift, HelpCircle, LoaderCircle, Minus, NotebookPen, Settings, Square, Timer, X } from "lucide-react";
 import { Layout as AntLayout, Menu, message, Tooltip } from "antd";
@@ -194,14 +194,14 @@ export default function Layout() {
   const openOnboarding = () => window.dispatchEvent(new CustomEvent("lifeplan:open-onboarding"));
   const startDrag = (event: MouseEvent<HTMLDivElement>) => { if (event.button === 0) void appWindow.startDragging(); };
 
-  return <AntLayout className="app-shell">
+  return <AntLayout className={`app-shell${usesMacWindowFrame() ? " macos-window-frame" : ""}`}>
     <div className="custom-titlebar" data-tauri-drag-region onMouseDown={startDrag}>
       <div className="custom-titlebar-drag" data-tauri-drag-region />
       <div className="custom-titlebar-controls">
         <button type="button" aria-label="了解 LifePlan" title="了解 LifePlan" onMouseDown={(event) => event.stopPropagation()} onClick={openOnboarding}><HelpCircle size={16} /></button>
-        <button type="button" aria-label="最小化" onMouseDown={(event) => event.stopPropagation()} onClick={minimize}><Minus size={16} /></button>
+        {!usesMacWindowFrame() && <><button type="button" aria-label="最小化" onMouseDown={(event) => event.stopPropagation()} onClick={minimize}><Minus size={16} /></button>
         <button type="button" aria-label="最大化" onMouseDown={(event) => event.stopPropagation()} onClick={toggleMaximize}><Square size={13} /></button>
-        <button type="button" aria-label="关闭" className="custom-titlebar-close" onMouseDown={(event) => event.stopPropagation()} onClick={close}><X size={16} /></button>
+        <button type="button" aria-label="关闭" className="custom-titlebar-close" onMouseDown={(event) => event.stopPropagation()} onClick={close}><X size={16} /></button></>}
       </div>
     </div>
     <AntLayout.Sider className="sidebar" width={148} theme="light">

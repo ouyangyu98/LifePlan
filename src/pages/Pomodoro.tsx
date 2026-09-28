@@ -7,7 +7,7 @@ import { actionsApi, dailyScheduleApi, pomodoroApi } from "@/lib/api";
 import type { Action, PomodoroRecord, PomodoroStatus } from "@/types";
 import { userFacingError } from "@/lib/errors";
 import { track } from "@/lib/analytics";
-import { loadFloatingPosition, loadFloatingSize, saveFloatingMode, saveFloatingPosition, saveFloatingSize } from "@/lib/windowPreferences";
+import { loadFloatingPosition, loadFloatingSize, saveFloatingMode, saveFloatingPosition, saveFloatingSize, usesMacWindowFrame } from "@/lib/windowPreferences";
 import { useFeaturePreferences } from "@/lib/featurePreferences";
 
 type PomodoroPhase = "work" | "rest";
@@ -186,8 +186,7 @@ export default function Pomodoro() {
       await appWindow.setAlwaysOnTop(false);
       await appWindow.setMaxSize(null);
       await appWindow.setMinSize(new LogicalSize(1050, 650));
-      // 窗口始终使用自研标题栏，退出悬浮模式时不能恢复系统标题栏。
-      await appWindow.setDecorations(false);
+      await appWindow.setDecorations(usesMacWindowFrame());
       await appWindow.setResizable(true);
       if (snapshot) {
         await appWindow.setSize(new PhysicalSize(snapshot.size.width, snapshot.size.height));
@@ -209,7 +208,7 @@ export default function Pomodoro() {
       await appWindow.setMinSize(new LogicalSize(240, 240));
       await appWindow.setMaxSize(new LogicalSize(320, 320));
       await appWindow.setResizable(true);
-      await appWindow.setDecorations(false);
+      await appWindow.setDecorations(usesMacWindowFrame());
       const savedSize = loadFloatingSize();
       const width = savedSize ? Math.max(240, Math.min(320, savedSize.width)) : 320;
       const height = savedSize ? Math.max(240, Math.min(320, savedSize.height)) : 320;
@@ -494,7 +493,6 @@ export default function Pomodoro() {
     <Modal title="记录番茄中断" open={interruptOpen} onCancel={() => setInterruptOpen(false)} okText="保存" cancelText="取消" confirmLoading={interrupting} onOk={() => void form.submit()}><Form form={form} layout="vertical" onFinish={(values) => void submitInterrupt(values)}><Form.Item name="interruptType" label="打断类型" initialValue={0} rules={[{ required: true }]}><Select options={[{ value: 0, label: "内部分心" }, { value: 1, label: "外部干扰" }, { value: 2, label: "紧急事务" }]} /></Form.Item><Form.Item name="reason" label="打断原因"><Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} /></Form.Item></Form></Modal>
   </div>;
 }
-
 
 
 
