@@ -23,12 +23,12 @@ test("personal features UI with isolated Tauri fixtures", { timeout: 120000 }, a
     if (!data) {
       data = {
         categories: [{ id: 1, name: "工作", color: "#1778FF", sort_order: 0, ...empty }, { id: 2, name: "成长", color: "#13A8A8", sort_order: 1, ...empty }],
-        events: Array.from({ length: 6 }, (_, status) => [1, 2, null].map((category_id, i) => ({
+        events: [0, 1, 3, 4, 5].flatMap((status) => [1, 2, null].map((category_id, i) => ({
           ...empty, id: status * 10 + i + 1, title: `事件${status}-${i + 1}`, status, category_id, target: "原有目标",
-        }))).flat(),
+        }))),
         actions: [
           { ...empty, id: 1, event_id: 11, title: "第一项子任务", status: 0, estimated_hours: 0.5, sort_order: 1 },
-          { ...empty, id: 2, event_id: 21, title: "委托跟进子任务", status: 0, estimated_hours: 1, sort_order: 1, is_delegated_follow_up: 1 },
+          { ...empty, id: 2, event_id: 12, title: "第二项子任务", status: 0, estimated_hours: 1, sort_order: 1 },
         ],
         note: { space_id: "test-space", content: "", updated_at: 0 },
       };
@@ -110,8 +110,10 @@ test("personal features UI with isolated Tauri fixtures", { timeout: 120000 }, a
   try {
     await page.goto(`${baseUrl}/#/inbox`);
     await page.getByRole("tab", { name: /待处理 3/ }).waitFor();
-    const tabs = ["待处理", "进行中", "已委托", "推迟", "已放弃", "已完成"];
-    for (const [status, tab] of tabs.entries()) {
+    const tabs = ["待处理", "进行中", "推迟", "已放弃", "已完成"];
+    const statusKeys = [0, 1, 3, 4, 5];
+    for (const [index, tab] of tabs.entries()) {
+      const status = statusKeys[index];
       await page.getByRole("tab", { name: new RegExp(tab) }).click();
       await switchView("看板");
       assert.equal(await page.locator(".event-board-column").count(), 3);
@@ -135,12 +137,12 @@ test("personal features UI with isolated Tauri fixtures", { timeout: 120000 }, a
     await row.getByRole("button", { name: "行动 0/1" }).waitFor();
     await switchView("看板");
     await screenshot("inbox-board-desktop.png");
-    await page.getByRole("tab", { name: /已委托/ }).click();
-    row = page.locator(".record-card").filter({ hasText: "事件2-1" });
+    await page.getByRole("tab", { name: /进行中/ }).click();
+    row = page.locator(".record-card").filter({ hasText: "事件1-2" });
     await row.getByRole("button", { name: "行动 0/1" }).click();
     await row.locator("[data-event-action-id='2']").getByRole("button", { name: "完成", exact: true }).click();
     await row.getByRole("button", { name: "行动 1/1" }).waitFor();
-    assert.equal(await page.evaluate(() => window.fixture.events.find((item) => item.id === 21).status), 2);
+    assert.equal(await page.evaluate(() => window.fixture.events.find((item) => item.id === 12).status), 1);
 
     await page.getByRole("button", { name: "管理分类" }).click();
     let dialog = page.getByRole("dialog");
@@ -153,7 +155,7 @@ test("personal features UI with isolated Tauri fixtures", { timeout: 120000 }, a
 
     await page.getByRole("tab", { name: /已完成/ }).click();
     row = page.locator(".record-card").filter({ hasText: "事件5-3" });
-    await row.getByRole("button", { name: "编辑", exact: true }).click();
+    await row.getByRole("button", { name: "编辑事件", exact: true }).click();
     dialog = page.getByRole("dialog");
     await chooseCategory(dialog, "工作事务");
     await dialog.getByRole("button", { name: /^保\s*存$/ }).click();
@@ -161,13 +163,13 @@ test("personal features UI with isolated Tauri fixtures", { timeout: 120000 }, a
     assert.equal(await page.evaluate(() => window.fixture.events.find((item) => item.id === 53).status), 5);
 
     await page.getByRole("tab", { name: /待处理/ }).click();
-    await page.locator(".inbox-new-category .event-category-select").click();
+    await page.locator(".quick-add .event-category-select").click();
     await page.getByLabel("新分类名称", { exact: true }).fill("生活");
     await page.getByRole("button", { name: "新增并选择分类" }).click();
     await page.waitForFunction(() => window.fixture.categories.some((item) => item.name === "生活"));
     await page.locator(".page-title").click();
-    await page.locator(".quick-add input").fill("有分类的新事件");
-    await page.getByRole("button", { name: "新增事件", exact: true }).click();
+    await page.locator(".quick-add > input").fill("有分类的新事件");
+    await page.getByRole("button", { name: "新增", exact: true }).click();
     await page.locator(".record-card").filter({ hasText: "有分类的新事件" }).waitFor();
     assert.equal(await page.evaluate(() => window.fixture.events.find((item) => item.id === 100).category_id), 3);
 
@@ -183,7 +185,7 @@ test("personal features UI with isolated Tauri fixtures", { timeout: 120000 }, a
     await page.setViewportSize({ width: 390, height: 844 });
     await screenshot("inbox-board-mobile.png");
     assert.deepEqual(errors, []);
-    console.log("Verified all six tabs, view preferences, categories, completed-event classification, child completion/undo and new-event categories.");
+    console.log("Verified all five tabs, view preferences, categories, completed-event classification, child completion/undo and new-event categories.");
   } catch (error) {
     await screenshot("failure.png");
     throw error;

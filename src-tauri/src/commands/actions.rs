@@ -1,7 +1,5 @@
 use crate::db::{current_space_id, new_uuid, now_millis};
-use crate::models::{
-    Action, DelegatedFollowUpResolution, NewAction, ReorderEventActions, UpdateAction,
-};
+use crate::models::{Action, NewAction, ReorderEventActions, UpdateAction};
 use crate::AppState;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashSet;
@@ -12,23 +10,21 @@ fn row_to_action(row: &rusqlite::Row) -> rusqlite::Result<Action> {
         id: row.get(0)?,
         event_id: row.get(1)?,
         event_title: row.get(2)?,
-        delegated_to: row.get(3)?,
-        title: row.get(4)?,
-        description: row.get(5)?,
-        estimated_hours: row.get(6)?,
-        start_date: row.get(7)?,
-        deadline: row.get(8)?,
-        is_frog: row.get(9)?,
-        importance: row.get(10)?,
-        urgency: row.get(11)?,
-        priority: row.get(12)?,
-        status: row.get(13)?,
-        completed_at: row.get(14)?,
-        is_delegated_follow_up: row.get(15)?,
-        cascade_abandoned: row.get(16)?,
-        sort_order: row.get(17)?,
-        created_at: row.get(18)?,
-        updated_at: row.get(19)?,
+        title: row.get(3)?,
+        description: row.get(4)?,
+        estimated_hours: row.get(5)?,
+        start_date: row.get(6)?,
+        deadline: row.get(7)?,
+        is_frog: row.get(8)?,
+        importance: row.get(9)?,
+        urgency: row.get(10)?,
+        priority: row.get(11)?,
+        status: row.get(12)?,
+        completed_at: row.get(13)?,
+        cascade_abandoned: row.get(14)?,
+        sort_order: row.get(15)?,
+        created_at: row.get(16)?,
+        updated_at: row.get(17)?,
     })
 }
 fn to_sql_error(e: crate::db::DbError) -> rusqlite::Error {
@@ -36,7 +32,7 @@ fn to_sql_error(e: crate::db::DbError) -> rusqlite::Error {
 }
 pub fn list_actions(conn: &Connection) -> rusqlite::Result<Vec<Action>> {
     let space = current_space_id(conn).map_err(to_sql_error)?;
-    let mut q=conn.prepare("SELECT a.id,a.event_id,e.title,e.delegated_to,a.title,a.description,a.estimated_hours,a.start_date,a.deadline,a.is_frog,a.importance,a.urgency,a.priority,a.status,a.completed_at,a.is_delegated_follow_up,a.cascade_abandoned,a.sort_order,a.created_at,a.updated_at FROM actions a LEFT JOIN events e ON e.id=a.event_id AND e.space_id=a.space_id AND e.deleted_at IS NULL WHERE a.space_id=?1 AND a.deleted_at IS NULL ORDER BY CASE WHEN a.event_id IS NULL THEN 1 ELSE 0 END,a.start_date IS NULL,a.start_date,a.sort_order,a.id")?;
+    let mut q=conn.prepare("SELECT a.id,a.event_id,e.title,a.title,a.description,a.estimated_hours,a.start_date,a.deadline,a.is_frog,a.importance,a.urgency,a.priority,a.status,a.completed_at,a.cascade_abandoned,a.sort_order,a.created_at,a.updated_at FROM actions a LEFT JOIN events e ON e.id=a.event_id AND e.space_id=a.space_id AND e.deleted_at IS NULL WHERE a.space_id=?1 AND a.deleted_at IS NULL ORDER BY CASE WHEN a.event_id IS NULL THEN 1 ELSE 0 END,a.start_date IS NULL,a.start_date,a.sort_order,a.id")?;
     let result = q.query_map([space], row_to_action)?.collect();
     result
 }
@@ -219,11 +215,15 @@ pub(super) fn restore_action_impl(state: &AppState, id: i64) -> Result<Action, S
 
 #[tauri::command]
 pub fn delete_action(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    delete_action_impl(&state, id)
+}
+
+pub(super) fn delete_action_impl(state: &AppState, id: i64) -> Result<(), String> {
     let mut c = state.db.lock().map_err(|e| e.to_string())?;
     let tx = c.transaction().map_err(|e| e.to_string())?;
     let space = current_space_id(&tx).map_err(|e| e.to_string())?;
-    let relation: Option<(Option<i64>, i32, Option<i32>)> = tx.query_row("SELECT a.event_id,a.is_delegated_follow_up,e.status FROM actions a LEFT JOIN events e ON e.id=a.event_id AND e.space_id=a.space_id AND e.deleted_at IS NULL WHERE a.id=?1 AND a.space_id=?2 AND a.deleted_at IS NULL", params![id, space], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional().map_err(|e| e.to_string())?;
-    let Some((event, delegated, event_status)) = relation else {
+    let relation: Option<Option<i32>> = tx.query_row("SELECT e.status FROM actions a LEFT JOIN events e ON e.id=a.event_id AND e.space_id=a.space_id AND e.deleted_at IS NULL WHERE a.id=?1 AND a.space_id=?2 AND a.deleted_at IS NULL", params![id, space], |r| r.get(0)).optional().map_err(|e| e.to_string())?;
+    let Some(event_status) = relation else {
         return Err("行动不存在".into());
     };
     if event_status == Some(5) {
@@ -235,47 +235,10 @@ pub fn delete_action(state: State<'_, AppState>, id: i64) -> Result<(), String> 
         params![now, id, space],
     )
     .map_err(|e| e.to_string())?;
-    if delegated == 1 {
-        if let Some(event) = event {
-            tx.execute("UPDATE events SET status=0,delegated_to=NULL,follow_up_date=NULL,follow_up_note=NULL,updated_at=?1 WHERE id=?2 AND space_id=?3", params![now, event, space]).map_err(|e| e.to_string())?;
-        }
-    }
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 
-#[tauri::command]
-pub fn complete_delegated_follow_up(
-    state: State<'_, AppState>,
-    payload: DelegatedFollowUpResolution,
-) -> Result<(), String> {
-    let mut c = state.db.lock().map_err(|e| e.to_string())?;
-    let tx = c.transaction().map_err(|e| e.to_string())?;
-    let space = current_space_id(&tx).map_err(|e| e.to_string())?;
-    let(event,status):(i64,i32)=tx.query_row("SELECT event_id,status FROM actions WHERE id=?1 AND space_id=?2 AND is_delegated_follow_up=1 AND deleted_at IS NULL",params![payload.action_id,space],|r|Ok((r.get(0)?,r.get(1)?))).map_err(|e|e.to_string())?;
-    if status != 1 {
-        return Err("委托跟进行动完成后才能处理事件结果".into());
-    }
-    let now = now_millis();
-    match payload.resolution.as_str() {
-        "complete" => {
-            tx.execute(
-                "UPDATE events SET status=5,updated_at=?1 WHERE id=?2 AND space_id=?3",
-                params![now, event, space],
-            )
-            .map_err(|e| e.to_string())?;
-            super::events::award_event_completion_tx(&tx, event, &space, 1)?;
-        }
-        "abandon" => super::events::abandon_event_tx(
-            &tx,
-            event,
-            payload.abandon_reason.as_deref().unwrap_or(""),
-            now,
-        )?,
-        _ => return Err("不支持的委托处理结果".into()),
-    };
-    tx.commit().map_err(|e| e.to_string())
-}
 #[tauri::command]
 pub fn reorder_event_actions(
     state: State<'_, AppState>,

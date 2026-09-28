@@ -51,7 +51,6 @@ export const actionsApi = {
   restore: (id: number) => invokeCommand<Action>("restore_action", { id }),
   delete: (id: number) => invokeCommand<void>("delete_action", { id }),
   reorderEvent: (payload: ReorderEventActions) => invokeCommand<void>("reorder_event_actions", { payload }),
-  resolveDelegated: (actionId: number, resolution: string, abandonReason?: string) => invokeCommand<void>("complete_delegated_follow_up", { payload: { action_id: actionId, resolution, abandon_reason: abandonReason } }),
 };
 
 export const recurringActionsApi = {

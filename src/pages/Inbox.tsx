@@ -13,6 +13,7 @@ import {
   Card,
   Checkbox,
   DatePicker,
+  Dropdown,
   Empty,
   Form,
   Input,
@@ -25,6 +26,7 @@ import {
   Steps,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from "antd";
@@ -35,6 +37,7 @@ import {
   GripVertical,
   ListChecks,
   LoaderCircle,
+  MoreHorizontal,
   Plus,
   RotateCcw,
   Rows3,
@@ -55,32 +58,12 @@ import Modal from "@/components/ui/Modal";
 import EventCategorySelect from "@/components/ui/EventCategorySelect";
 import { track } from "@/lib/analytics";
 
-const statusLabels: Record<number, string> = {
-  0: "未处理",
-  1: "进行中",
-  2: "已委托",
-  3: "推迟",
-  4: "已放弃",
-  5: "已完成",
-};
-const statusColors: Record<number, string> = {
-  0: "blue",
-  1: "processing",
-  2: "gold",
-  3: "orange",
-  4: "red",
-  5: "green",
-};
 const hours = [
   { value: 0.5, label: "30 分钟" },
   { value: 1, label: "1 小时" },
   { value: 1.5, label: "1.5 小时" },
   { value: 2, label: "2 小时" },
 ];
-const formatCreatedDate = (timestamp: number) => {
-  const date = new Date(timestamp);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} 新增`;
-};
 const toDateString = (value: Dayjs | string | undefined) =>
   typeof value === "string" ? value : value?.format("YYYY-MM-DD");
 const formatDuration = (value: number) =>
@@ -106,9 +89,9 @@ const sortEventActions = (actions: Action[]) =>
       ? leftOrder - rightOrder
       : compareActionDate(left, right);
   });
-type ProcessMode = "self" | "delegate" | "delay" | "abandon";
+type ProcessMode = "self" | "delay" | "abandon";
 type InboxTab =
-  "pending" | "events" | "delegated" | "delayed" | "abandoned" | "completed";
+  "pending" | "events" | "delayed" | "abandoned" | "completed";
 type InboxView = "list" | "board";
 const inboxViewStorageKey = "lifeplan-inbox-views-v1";
 const categoryColors = [
@@ -139,13 +122,12 @@ export default function Inbox() {
       return {
         pending: saved.pending === "board" ? "board" : "list",
         events: saved.events === "board" ? "board" : "list",
-        delegated: saved.delegated === "board" ? "board" : "list",
         delayed: saved.delayed === "board" ? "board" : "list",
         abandoned: saved.abandoned === "board" ? "board" : "list",
         completed: saved.completed === "board" ? "board" : "list",
       };
     } catch {
-      return { pending: "list", events: "list", delegated: "list", delayed: "list", abandoned: "list", completed: "list" };
+      return { pending: "list", events: "list", delayed: "list", abandoned: "list", completed: "list" };
     }
   });
   const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);
@@ -158,7 +140,6 @@ export default function Inbox() {
   const [busyActions, setBusyActions] = useState<Set<number>>(() => new Set());
   const busyActionIds = useRef(new Set<number>());
   const [newTitle, setNewTitle] = useState("");
-  const [messageApi, messageContextHolder] = message.useMessage();
   const [editing, setEditing] = useState<Event | null>(null);
   const [processing, setProcessing] = useState<{
     event: Event;
@@ -224,6 +205,9 @@ export default function Inbox() {
   useEffect(() => {
     void load();
   }, []);
+  useEffect(() => {
+    try { localStorage.setItem(inboxViewStorageKey, JSON.stringify(views)); } catch { /* Storage may be unavailable. */ }
+  }, [views]);
   const setInboxView = (view: InboxView) => {
     const next = { ...views, [filter]: view };
     setViews(next);
@@ -245,7 +229,6 @@ export default function Inbox() {
     const status: Record<InboxTab, number> = {
       pending: 0,
       events: 1,
-      delegated: 2,
       delayed: 3,
       abandoned: 4,
       completed: 5,
@@ -255,7 +238,6 @@ export default function Inbox() {
   const counts = useMemo(
     () => ({
       pending: events.filter((event) => event.status === 0).length,
-      delegated: events.filter((event) => event.status === 2).length,
       delayed: events.filter((event) => event.status === 3).length,
       abandoned: events.filter((event) => event.status === 4).length,
       completed: events.filter((event) => event.status === 5).length,
@@ -274,13 +256,6 @@ export default function Inbox() {
     } catch (cause) {
       setError(userFacingError(cause));
     }
-  };
-  const showEmptyTitleMessage = () => {
-    messageApi.open({
-      type: "info",
-      content: "请先输入事件名称",
-      className: "quick-add-empty-toast",
-    });
   };
   const updateEvent = async (values: {
     title: string;
@@ -317,11 +292,9 @@ export default function Inbox() {
           ? "completed"
           : payload.decision === "self"
             ? "events"
-            : payload.decision === "delegate"
-              ? "delegated"
-              : payload.decision === "delay"
-                ? "delayed"
-                : "abandoned",
+            : payload.decision === "delay"
+              ? "delayed"
+              : "abandoned",
       );
       await load();
       message.success(payload.quick_complete ? "事件已完成" : "事件处理完成");
@@ -427,11 +400,12 @@ export default function Inbox() {
       setCategorySaving(false);
     }
   };
-  const renderEventRow = (item: Event, index: number) => (
+  const renderEventRow = (item: Event, index: number, board: boolean) => (
     <EventRow
       key={item.id}
       item={item}
       index={index}
+      board={board}
       onEdit={setEditing}
       onProcess={(mode) => setProcessing({ event: item, mode })}
       onDelete={() => void remove(item)}
@@ -456,63 +430,45 @@ export default function Inbox() {
 
   return (
     <div className="page inbox-page">
-      {messageContextHolder}
       <header className="page-header inbox-header">
         <div className="page-header-top">
-          <div>
+          <div className="inbox-heading">
             <Typography.Title level={2} className="page-title">
               事件篮
             </Typography.Title>
-            <Typography.Paragraph className="page-subtitle">
-              先把脑中的事情放进来，再决定下一步怎么处理。
-            </Typography.Paragraph>
           </div>
           <Form className="quick-add" onFinish={() => void addEvent()}>
             <Input
               value={newTitle}
               onChange={(event) => setNewTitle(event.target.value)}
               placeholder="记录一个新事件…"
-              addonAfter={
-                <span className="quick-add-button-wrapper">
-                  <Button
-                    type="primary"
-                    htmlType="submit"
-                    disabled={!newTitle.trim()}
-                    icon={<Plus size={15} />}
-                  >
-                    新增事件
-                  </Button>
-                  {!newTitle.trim() && (
-                    <button
-                      className="quick-add-button-overlay"
-                      type="button"
-                      aria-label="请先输入事件名称"
-                      onClick={showEmptyTitleMessage}
-                    />
-                  )}
-                </span>
-              }
             />
+            <EventCategorySelect value={newCategoryId} onChange={setNewCategoryId} categories={categories} onCreated={(category) => setCategories((current) => [...current, category])} />
+            <Button
+              type="primary"
+              htmlType="submit"
+              disabled={!newTitle.trim()}
+              icon={<Plus size={15} />}
+            >
+              新增
+            </Button>
           </Form>
         </div>
-        <div className="inbox-new-category">
-          <EventCategorySelect value={newCategoryId} onChange={setNewCategoryId} categories={categories} onCreated={(category) => setCategories((current) => [...current, category])} />
-        </div>
       </header>
-      <Tabs
-        className="inbox-tabs"
-        activeKey={filter}
-        onChange={(key) => setFilter(key as InboxTab)}
-        items={[
-          { key: "pending", label: `待处理 ${counts.pending}` },
-          { key: "events", label: `进行中 ${counts.events}` },
-          { key: "delegated", label: `已委托 ${counts.delegated}` },
-          { key: "delayed", label: `推迟 ${counts.delayed}` },
-          { key: "abandoned", label: `已放弃 ${counts.abandoned}` },
-          { key: "completed", label: `已完成 ${counts.completed}` },
-        ]}
-      />
-      <div className="inbox-view-toolbar">
+      <div className="inbox-filter-row">
+        <Tabs
+          className="inbox-tabs"
+          activeKey={filter}
+          onChange={(key) => setFilter(key as InboxTab)}
+          items={[
+            { key: "pending", label: `待处理 ${counts.pending}` },
+            { key: "events", label: `进行中 ${counts.events}` },
+            { key: "delayed", label: `推迟 ${counts.delayed}` },
+            { key: "abandoned", label: `已放弃 ${counts.abandoned}` },
+            { key: "completed", label: `已完成 ${counts.completed}` },
+          ]}
+        />
+        <div className="inbox-view-toolbar">
         <Space size={6} wrap>
           <Segmented value={views[filter]} onChange={(value) => setInboxView(value as InboxView)} options={[
             { value: "list", label: <span title="列表视图" aria-label="列表视图"><Rows3 size={16} /></span> },
@@ -522,6 +478,7 @@ export default function Inbox() {
             管理分类
           </Button>
         </Space>
+        </div>
       </div>
       {error && (
         <Alert
@@ -536,7 +493,7 @@ export default function Inbox() {
       <div className={`record-list ${views[filter] === "board" ? "record-board" : ""} ${loading || visibleEvents.length === 0 ? "record-list-empty" : ""}`}>
         {loading ? (
           <div className="card empty">正在加载…</div>
-        ) : visibleEvents.length === 0 && views[filter] === "list" ? (
+        ) : visibleEvents.length === 0 ? (
           <div
             className={`card ${filter === "pending" ? "onboarding-empty" : "inbox-empty-state"}`}
           >
@@ -549,9 +506,6 @@ export default function Inbox() {
                     <Typography.Title level={4}>
                       先把脑中的事情记下来
                     </Typography.Title>
-                    <Typography.Paragraph type="secondary">
-                      记录后再决定是自己做、委托、延后，还是放弃。
-                    </Typography.Paragraph>
                     <Button
                       type="primary"
                       onClick={() =>
@@ -570,9 +524,10 @@ export default function Inbox() {
             />
           </div>
         ) : (
-          views[filter] === "list" ? visibleEvents.map((item, index) => renderEventRow(item, index + 1)) : (
+          views[filter] === "list" ? visibleEvents.map((item, index) => renderEventRow(item, index + 1, false)) : (
             <div className="event-board-columns">
               {[...categories.map((category) => ({ category, items: visibleEvents.filter((item) => item.category_id === category.id) })), { category: null, items: visibleEvents.filter((item) => !categories.some((category) => category.id === item.category_id)) }]
+                .filter((column) => column.items.length > 0)
                 .map((column) => (
                   <section className="event-board-column" key={column.category?.id ?? "uncategorized"}>
                     <div className="event-board-column-head">
@@ -582,7 +537,7 @@ export default function Inbox() {
                       <Typography.Text type="secondary">{column.items.length}</Typography.Text>
                     </div>
                     <div className="event-board-column-body">
-                      {column.items.length === 0 ? <Typography.Text type="secondary">暂无事件</Typography.Text> : column.items.map((item, index) => renderEventRow(item, index + 1))}
+                      {column.items.map((item, index) => renderEventRow(item, index + 1, true))}
                     </div>
                   </section>
                 ))}
@@ -730,6 +685,7 @@ export default function Inbox() {
 function EventRow({
   item,
   index,
+  board,
   onEdit,
   onProcess,
   onDelete,
@@ -748,6 +704,7 @@ function EventRow({
 }: {
   item: Event;
   index: number;
+  board: boolean;
   onEdit: (event: Event) => void;
   onProcess: (mode: ProcessMode) => void;
   onDelete: () => void;
@@ -764,209 +721,71 @@ function EventRow({
   busyActions: Set<number>;
   onReorder: (actionIds: number[]) => Promise<void>;
 }) {
-  const active = item.status === 0 || item.status === 3;
-  const toggle = onToggle;
-  const readOnly = item.status === 5;
-  if (item.status === 1 || item.status === 2 || readOnly)
-    return (
-      <Card
-        className="record-card event-card event-card-clickable"
-        size="small"
-        onClick={(event) => {
-          if (
-            event.target instanceof Element &&
-            event.target.closest(
-              "button, a, input, textarea, select, [role='button'], .event-actions-panel",
-            )
-          )
-            return;
-          toggle();
-        }}
-        title={
-          <div className="event-card-header-shell">
-            <div className="event-card-header">
-              <Typography.Text strong className="event-card-title">
-                <span className="card-index">{index}.</span>
-                {item.title}
-              </Typography.Text>
-              <Tag
-                className="event-status-tag"
-                color={statusColors[item.status]}
-              >
-                {statusLabels[item.status]}
-              </Tag>
-              <div className="event-card-meta">
-                {item.delegated_to && <span>委托给 {item.delegated_to}</span>}
-                {item.category_name && <Tag className="event-category-tag" color={item.category_color}>{item.category_name}</Tag>}
-                <button
-                  type="button"
-                  className="event-action-summary"
-                  aria-expanded={expanded}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    toggle();
-                  }}
-                >
-                  <ListChecks size={15} strokeWidth={1.8} aria-hidden="true" />
-                  行动 {item.completed_action_count}/{item.action_count}
-                </button>
-              </div>
-            </div>
-            <Space
-              className="event-card-extra"
-              onClick={(event) => event.stopPropagation()}
-              size={4}
-              wrap
-            >
-              <Button
-                size="small"
-                type="text"
-                icon={<Edit3 size={14} />}
-                onClick={() => onEdit(item)}
-              >
-                编辑
-              </Button>
-              {!readOnly && (
-                <>
-                  {item.status === 1 && item.completed_action_count === item.action_count &&
-                    item.action_count > 0 && (
-                      <Button
-                        size="small"
-                        type="primary"
-                        icon={<Check size={14} />}
-                        onClick={onComplete}
-                      >
-                        完成
-                      </Button>
-                    )}
-                  {item.status === 1 && <Button
-                    size="small"
-                    danger
-                    type="text"
-                    onClick={() => onProcess("abandon")}
-                  >
-                    放弃
-                  </Button>}
-                </>
-              )}
-              <Popconfirm
-                title="删除事件会同时删除全部行动，确定继续吗？"
-                onConfirm={onDelete}
-                okText="确定"
-                cancelText="取消"
-              >
-                <Button
-                  size="small"
-                  danger
-                  type="text"
-                  icon={<Trash2 size={14} />}
-                />
-              </Popconfirm>
-            </Space>
-          </div>
-        }
-      >
-        {expanded && (
-          <EventActionList
-            event={item}
-            actions={actions}
-            readOnly={readOnly}
-            onAdd={onAddAction}
-            onEdit={onEditAction}
-            onDelete={onDeleteAction}
-            onComplete={onCompleteAction}
-            onRestore={onRestoreAction}
-            busyActions={busyActions}
-            onReorder={onReorder}
-          />
-        )}
-      </Card>
-    );
+  const canFinish = item.status === 1 && item.completed_action_count === item.action_count;
+  const active = item.status === 0 || item.status === 1 || item.status === 3;
+  const readOnly = item.status !== 1;
+  const menuItems = [
+    ...(item.status === 0 || item.status === 3 ? [{ key: "delay", label: "推迟", onClick: () => onProcess("delay") }] : []),
+    ...(active ? [{ key: "abandon", label: "放弃", danger: true, onClick: () => onProcess("abandon") }] : []),
+    ...(active ? [{ type: "divider" as const }] : []),
+    { key: "delete", label: "删除", danger: true, icon: <Trash2 size={14} />, onClick: () => AntModal.confirm({
+      title: "删除事件会同时删除全部行动，确定继续吗？",
+      okText: "确定",
+      cancelText: "取消",
+      onOk: onDelete,
+    }) },
+  ];
   return (
     <Card
-      className="record-card event-card"
+      className={`record-card event-card ${expanded ? "is-expanded" : ""}`}
       size="small"
-      title={
-        <Typography.Text strong className="row-title">
-          <span className="card-index">{index}.</span>
-          {item.title}
-        </Typography.Text>
-      }
-      extra={
-        <Tag color={statusColors[item.status]}>{statusLabels[item.status]}</Tag>
-      }
+      onClick={(event) => {
+        if (event.target instanceof Element && event.target.closest("button, a, input, textarea, select, [role='button'], .event-actions-panel")) return;
+        onToggle();
+      }}
     >
-      <div className="event-card-body">
-        <div className="row-meta">
-          <span>{formatCreatedDate(item.created_at)}</span>
-          {item.category_name && <Tag className="event-category-tag" color={item.category_color}>{item.category_name}</Tag>}
-          {item.delegated_to && <span>委托给 {item.delegated_to}</span>}
-          {item.delay_until && <span>推迟至 {item.delay_until}</span>}
-          {item.action_count > 0 && (
-            <span>
-              {item.action_count} 条行动 · {item.pending_action_count} 条待办
-            </span>
-          )}
+      <div className="event-card-main">
+        <div className="event-card-title-row">
+          <Typography.Text strong className="event-card-title">
+            <span className="card-index">{index}.</span>{item.title}
+          </Typography.Text>
+          <Space size={0} onClick={(event) => event.stopPropagation()}>
+            <Tooltip title="编辑事件"><Button size="small" type="text" aria-label="编辑事件" icon={<Edit3 size={15} />} onClick={() => onEdit(item)} /></Tooltip>
+            <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+              <Button size="small" type="text" aria-label="更多操作" title="更多操作" icon={<MoreHorizontal size={17} />} />
+            </Dropdown>
+          </Space>
         </div>
-        <Space className="card-actions" size={4} wrap>
-          <Button
-            size="small"
-            type="text"
-            icon={<Edit3 size={14} />}
-            onClick={() => onEdit(item)}
-          >
-            编辑
-          </Button>
-          {item.status === 4 ? (
-            <Button
-              size="small"
-              type="text"
-              icon={<RotateCcw size={14} />}
-              onClick={onRestore}
-            >
-              恢复
-            </Button>
-          ) : (
-            active && (
-              <>
-                <Button
-                  size="small"
-                  type="primary"
-                  onClick={() => onProcess("self")}
-                >
-                  去处理
-                </Button>
-                <Button size="small" onClick={() => onProcess("delegate")}>
-                  委托
-                </Button>
-                <Button size="small" onClick={() => onProcess("delay")}>
-                  推迟
-                </Button>
-                <Button
-                  size="small"
-                  danger
-                  onClick={() => onProcess("abandon")}
-                >
-                  放弃
-                </Button>
-              </>
-            )
-          )}
-          <Popconfirm
-            title="删除事件会同时删除其全部行动，确定继续吗？"
-            onConfirm={onDelete}
-            okText="确定"
-            cancelText="取消"
-          >
-            <Button
-              size="small"
-              type="text"
-              danger
-              icon={<Trash2 size={15} />}
-            />
-          </Popconfirm>
-        </Space>
+        <div className="event-card-info-row">
+          <Space size={8} wrap>
+            {!board && item.category_name && <Tag className="event-category-tag" color={item.category_color}>{item.category_name}</Tag>}
+            {item.delay_until && <Typography.Text type="secondary">推迟至 {item.delay_until}</Typography.Text>}
+            <button type="button" className="event-action-summary" aria-expanded={expanded} onClick={(event) => { event.stopPropagation(); onToggle(); }}>
+              <ListChecks size={15} strokeWidth={1.8} aria-hidden="true" />
+              行动 {item.completed_action_count}/{item.action_count}
+            </button>
+          </Space>
+          <Space size={6} onClick={(event) => event.stopPropagation()}>
+            {item.status === 4 && <Button size="small" type="text" icon={<RotateCcw size={14} />} onClick={onRestore}>恢复</Button>}
+            {item.status === 1 && canFinish && <Button size="small" type="primary" icon={<Check size={14} />} onClick={onComplete}>完成</Button>}
+            {(item.status === 0 || item.status === 3) && <Button size="small" type="primary" onClick={() => onProcess("self")}>去处理</Button>}
+          </Space>
+        </div>
       </div>
+      {expanded && (
+        <EventActionList
+          event={item}
+          actions={actions}
+          readOnly={readOnly}
+          onAdd={onAddAction}
+          onEdit={onEditAction}
+          onDelete={onDeleteAction}
+          onComplete={onCompleteAction}
+          onRestore={onRestoreAction}
+          busyActions={busyActions}
+          onReorder={onReorder}
+        />
+      )}
     </Card>
   );
 }
@@ -1259,6 +1078,9 @@ function EventActionList({
         if (dragEvent.currentTarget === dragEvent.target) clearDropFeedback();
       }}
     >
+      {event.history_note && <Typography.Paragraph className="event-history-note">{event.history_note}</Typography.Paragraph>}
+      {event.abandon_reason && <Typography.Paragraph className="event-history-note">放弃原因：{event.abandon_reason}</Typography.Paragraph>}
+      {event.delay_note && <Typography.Paragraph className="event-history-note">推迟备注：{event.delay_note}</Typography.Paragraph>}
       {event.target && (
         <>
           <div className="event-section-head">
@@ -1450,11 +1272,9 @@ function ProcessModal({
   const title =
     mode === "self"
       ? "拆解行动"
-      : mode === "delegate"
-        ? "委托跟进"
-        : mode === "delay"
-          ? "推迟处理"
-          : "放弃事件";
+      : mode === "delay"
+        ? "推迟处理"
+        : "放弃事件";
   const addActionAfter = (index: number) => {
     const previous = steps[index];
     const nextIndex = index + 1;
@@ -1529,10 +1349,6 @@ function ProcessModal({
           Dayjs | string | undefined,
       ),
       action_steps: steps,
-      delegated_to: values.delegated_to as string,
-      follow_up_date: toDateString(
-        values.follow_up_date as Dayjs | string | undefined,
-      ),
       delay_until: toDateString(
         values.delay_until as Dayjs | string | undefined,
       ),
@@ -1694,17 +1510,6 @@ function ProcessModal({
                 </div>
               )}
             </>
-          ) : mode === "delegate" ? (
-            <div className="form-grid">
-              <Form.Item
-                name="delegated_to"
-                label="委托对象"
-                rules={[{ required: true, message: "请输入委托对象" }]}
-              >
-                <Input />
-              </Form.Item>
-              {dateField("follow_up_date", "跟进日期", true)}
-            </div>
           ) : mode === "delay" ? (
             <div className="form-grid">
               {dateField("delay_until", "重新处理日期")}

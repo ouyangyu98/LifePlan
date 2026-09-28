@@ -182,7 +182,6 @@ pub fn run() {
             actions::reorder_event_actions,
             actions::restore_action,
             actions::delete_action,
-            actions::complete_delegated_follow_up,
             daily_list::get_daily_list,
             daily_list::add_daily_list_item,
             daily_list::remove_daily_list_item,

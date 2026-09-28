@@ -12,22 +12,20 @@ fn row_to_event(row: &rusqlite::Row) -> rusqlite::Result<Event> {
         category_name: row.get(3)?,
         category_color: row.get(4)?,
         status: row.get(5)?,
-        delegated_to: row.get(6)?,
-        follow_up_date: row.get(7)?,
-        follow_up_note: row.get(8)?,
-        delay_until: row.get(9)?,
-        delay_note: row.get(10)?,
-        abandon_reason: row.get(11)?,
-        target: row.get(12)?,
-        deadline: row.get(13)?,
-        importance: row.get(14)?,
-        urgency: row.get(15)?,
-        action_count: row.get(16)?,
-        pending_action_count: row.get(17)?,
-        completed_action_count: row.get(18)?,
-        is_quick_completed: row.get(19)?,
-        created_at: row.get(20)?,
-        updated_at: row.get(21)?,
+        delay_until: row.get(6)?,
+        delay_note: row.get(7)?,
+        abandon_reason: row.get(8)?,
+        target: row.get(9)?,
+        deadline: row.get(10)?,
+        importance: row.get(11)?,
+        urgency: row.get(12)?,
+        action_count: row.get(13)?,
+        pending_action_count: row.get(14)?,
+        completed_action_count: row.get(15)?,
+        is_quick_completed: row.get(16)?,
+        created_at: row.get(17)?,
+        updated_at: row.get(18)?,
+        history_note: row.get(19)?,
     })
 }
 
@@ -126,13 +124,13 @@ pub fn list_events(conn: &Connection) -> rusqlite::Result<Vec<Event>> {
     restore_due_delays(conn)?;
     let space_id = current_space_id(conn).map_err(to_sql_error)?;
     let mut statement = conn.prepare(
-        "SELECT e.id, e.title, e.category_id, c.name, c.color, e.status, e.delegated_to, e.follow_up_date,
-                e.follow_up_note, e.delay_until, e.delay_note, e.abandon_reason,
+        "SELECT e.id, e.title, e.category_id, c.name, c.color, e.status,
+                e.delay_until, e.delay_note, e.abandon_reason,
                 e.target, e.deadline,
                 e.importance, e.urgency, COUNT(a.id),
                 COALESCE(SUM(CASE WHEN a.status = 0 THEN 1 ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN a.status = 1 THEN 1 ELSE 0 END), 0),
-                e.is_quick_completed, e.created_at, e.updated_at
+                e.is_quick_completed, e.created_at, e.updated_at, e.history_note
          FROM events e
          LEFT JOIN event_categories c ON c.id = e.category_id AND c.space_id = e.space_id
          LEFT JOIN actions a ON a.space_id = e.space_id AND a.deleted_at IS NULL
@@ -251,7 +249,7 @@ pub(super) fn process_event_impl(state: &AppState, payload: ProcessEvent) -> Res
     let Some(status) = status else {
         return Err("事件不存在".into());
     };
-    if status != 0 && status != 3 {
+    if status != 0 && status != 3 && !(status == 1 && payload.decision == "abandon") {
         return Err("当前事件不能重复处理".into());
     }
 
@@ -289,52 +287,6 @@ pub(super) fn process_event_impl(state: &AppState, payload: ProcessEvent) -> Res
             if quick_complete {
                 award_event_completion_tx(&tx, payload.event_id, &space_id, 0)?;
             }
-        }
-        "delegate" => {
-            let delegated_to = payload.delegated_to.as_deref().unwrap_or("").trim();
-            let follow_up_date = payload.follow_up_date.as_deref().unwrap_or("").trim();
-            if delegated_to.is_empty() || follow_up_date.is_empty() {
-                return Err("委托对象和跟进日期不能为空".into());
-            }
-            let event_title: String = tx
-                .query_row(
-                    "SELECT title FROM events WHERE id = ?1 AND space_id = ?2 AND deleted_at IS NULL",
-                    params![payload.event_id, space_id],
-                    |row| row.get(0),
-                )
-                .map_err(|error| error.to_string())?;
-            let action_title = format!("跟进委托{}-{}", delegated_to, event_title.trim());
-            tx.execute(
-                "UPDATE events SET status = 2, delegated_to = ?1, follow_up_date = ?2,
-                 follow_up_note = ?3, updated_at = ?4
-                 WHERE id = ?5 AND space_id = ?6 AND deleted_at IS NULL",
-                params![
-                    delegated_to,
-                    follow_up_date,
-                    Option::<&str>::None,
-                    timestamp,
-                    payload.event_id,
-                    space_id
-                ],
-            )
-            .map_err(|error| error.to_string())?;
-            tx.execute(
-                "INSERT INTO actions
-                 (space_id, sync_id, event_id, title, description, estimated_hours,
-                  start_date, is_frog, importance, urgency, priority,
-                  is_delegated_follow_up, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, 0, 0, 0, 4, 1, ?7, ?7)",
-                params![
-                    space_id,
-                    new_uuid(),
-                    payload.event_id,
-                    action_title,
-                    Option::<&str>::None,
-                    follow_up_date,
-                    timestamp
-                ],
-            )
-            .map_err(|error| error.to_string())?;
         }
         "delay" => {
             tx.execute(
@@ -465,7 +417,6 @@ pub fn restore_event(state: State<'_, AppState>, event_id: i64) -> Result<(), St
     }
     tx.execute(
         "UPDATE events SET status = 1,
-         delegated_to = NULL, follow_up_date = NULL, follow_up_note = NULL,
          delay_until = NULL, delay_note = NULL, abandon_reason = NULL,
          updated_at = ?1
          WHERE id = ?2 AND space_id = ?3 AND deleted_at IS NULL",

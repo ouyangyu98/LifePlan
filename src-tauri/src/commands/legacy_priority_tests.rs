@@ -81,14 +81,13 @@ fn editing_event_preserves_legacy_metadata_and_does_not_touch_actions() {
 
 #[test]
 fn processing_events_does_not_inherit_or_recalculate_priority() {
-    for decision in ["self", "delegate"] {
+    for decision in ["self"] {
         let state = state();
         let id = new_event(&state);
         legacy_metadata(&state, "events", id);
         events::process_event_impl(&state, payload(json!({
             "event_id": id, "decision": decision, "title": "Processed",
             "action_steps": [{"title": "Step", "estimated_hours": 0.5, "start_date": "2026-09-28"}],
-            "delegated_to": "Test person", "follow_up_date": "2026-09-29",
             "importance": 1, "urgency": 1
         }))).unwrap();
         assert_eq!(metadata(&state, "events", id), (1, 1, 1));

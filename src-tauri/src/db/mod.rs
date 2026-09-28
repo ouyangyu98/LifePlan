@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 pub mod backup;
 pub mod migrations;
+mod retire_delegation;
 
 #[derive(Error, Debug)]
 pub enum DbError {
@@ -153,6 +154,10 @@ pub fn run_migrations(conn: &mut Connection) -> Result<bool, DbError> {
         migrate_add_personal_features(conn)?;
         return Ok(false);
     }
+    if version == 17 {
+        retire_delegation::migrate(conn)?;
+        return Ok(false);
+    }
     if version == 13 {
         migrate_remove_projects(conn, true)?;
         return Ok(false);
@@ -198,10 +203,10 @@ fn migrate_add_personal_features(conn: &mut Connection) -> Result<(), DbError> {
         )
         .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
     }
-    validate_current_schema(&tx)?;
-    tx.pragma_update(None, "user_version", migrations::CURRENT_SCHEMA_VERSION)
+    tx.pragma_update(None, "user_version", 17)
         .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
-    tx.commit().map_err(|error| DbError::MigrationFailed(error.to_string()))
+    tx.commit().map_err(|error| DbError::MigrationFailed(error.to_string()))?;
+    retire_delegation::migrate(conn)
 }
 
 fn migrate_add_quick_completion_marker(conn: &mut Connection) -> Result<(), DbError> {
@@ -372,7 +377,7 @@ fn validate_current_schema(conn: &Connection) -> Result<(), DbError> {
         ("settings", &["key", "value", "updated_at"][..]),
         (
             "events",
-            &["space_id", "sync_id", "deleted_at", "category_id"][..],
+            &["space_id", "sync_id", "deleted_at", "category_id", "history_note"][..],
         ),
         (
             "actions",
@@ -552,7 +557,8 @@ mod tests {
                 space_id TEXT NOT NULL,
                 event_id INTEGER NOT NULL
             );
-            ALTER TABLE actions ADD COLUMN project_id INTEGER;",
+            ALTER TABLE actions ADD COLUMN project_id INTEGER;
+            ALTER TABLE actions ADD COLUMN is_delegated_follow_up INTEGER NOT NULL DEFAULT 0;",
         )
         .expect("构造旧项目结构失败");
 

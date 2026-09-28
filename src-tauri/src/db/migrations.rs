@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: i32 = 17;
+pub const CURRENT_SCHEMA_VERSION: i32 = 18;
 
 pub const INIT_MIGRATION: &str = r#"
 PRAGMA foreign_keys = OFF;
@@ -36,9 +36,7 @@ CREATE TABLE IF NOT EXISTS events (
     deleted_at INTEGER,
     title TEXT NOT NULL,
     status INTEGER NOT NULL DEFAULT 0,
-    delegated_to TEXT,
-    follow_up_date TEXT,
-    follow_up_note TEXT,
+    history_note TEXT,
     delay_until TEXT,
     delay_note TEXT,
     abandon_reason TEXT,
@@ -72,7 +70,6 @@ CREATE TABLE IF NOT EXISTS actions (
     priority INTEGER NOT NULL DEFAULT 4,
     status INTEGER NOT NULL DEFAULT 0,
     completed_at INTEGER,
-    is_delegated_follow_up INTEGER NOT NULL DEFAULT 0,
     cascade_abandoned INTEGER NOT NULL DEFAULT 0,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,

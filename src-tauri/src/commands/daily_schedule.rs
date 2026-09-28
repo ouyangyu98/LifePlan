@@ -61,29 +61,27 @@ fn row_to_action(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<Act
         id: row.get(offset)?,
         event_id: row.get(offset + 1)?,
         event_title: row.get(offset + 2)?,
-        delegated_to: row.get(offset + 3)?,
-        title: row.get(offset + 4)?,
-        description: row.get(offset + 5)?,
-        estimated_hours: row.get(offset + 6)?,
-        start_date: row.get(offset + 7)?,
-        deadline: row.get(offset + 8)?,
-        is_frog: row.get(offset + 9)?,
-        importance: row.get(offset + 10)?,
-        urgency: row.get(offset + 11)?,
-        priority: row.get(offset + 12)?,
-        status: row.get(offset + 13)?,
-        completed_at: row.get(offset + 14)?,
-        is_delegated_follow_up: row.get(offset + 15)?,
-        cascade_abandoned: row.get(offset + 16)?,
-        sort_order: row.get(offset + 17)?,
-        created_at: row.get(offset + 18)?,
-        updated_at: row.get(offset + 19)?,
+        title: row.get(offset + 3)?,
+        description: row.get(offset + 4)?,
+        estimated_hours: row.get(offset + 5)?,
+        start_date: row.get(offset + 6)?,
+        deadline: row.get(offset + 7)?,
+        is_frog: row.get(offset + 8)?,
+        importance: row.get(offset + 9)?,
+        urgency: row.get(offset + 10)?,
+        priority: row.get(offset + 11)?,
+        status: row.get(offset + 12)?,
+        completed_at: row.get(offset + 13)?,
+        cascade_abandoned: row.get(offset + 14)?,
+        sort_order: row.get(offset + 15)?,
+        created_at: row.get(offset + 16)?,
+        updated_at: row.get(offset + 17)?,
     })
 }
 
-fn slot_query(conn: &Connection, list_date: &str) -> rusqlite::Result<Vec<DailyScheduleSlot>> {
+pub(super) fn slot_query(conn: &Connection, list_date: &str) -> rusqlite::Result<Vec<DailyScheduleSlot>> {
     let space_id = current_space_id(conn).map_err(db_error)?;
-    let mut statement = conn.prepare("SELECT s.id, s.list_date, s.start_time, s.end_time, s.action_id, s.actual_notes, s.met_expectation, s.focused, s.sort_order, a.id, a.event_id, e.title, e.delegated_to, a.title, a.description, a.estimated_hours, a.start_date, a.deadline, a.is_frog, a.importance, a.urgency, a.priority, a.status, a.completed_at, a.is_delegated_follow_up, a.cascade_abandoned, COALESCE(a.sort_order, 0), a.created_at, a.updated_at FROM daily_schedule_slots s LEFT JOIN actions a ON a.id = s.action_id AND a.space_id = s.space_id AND a.deleted_at IS NULL LEFT JOIN events e ON e.id = a.event_id AND e.space_id = a.space_id AND e.deleted_at IS NULL WHERE s.space_id = ?1 AND s.list_date = ?2 ORDER BY s.start_time, s.id")?;
+    let mut statement = conn.prepare("SELECT s.id, s.list_date, s.start_time, s.end_time, s.action_id, s.actual_notes, s.met_expectation, s.focused, s.sort_order, a.id, a.event_id, e.title, a.title, a.description, a.estimated_hours, a.start_date, a.deadline, a.is_frog, a.importance, a.urgency, a.priority, a.status, a.completed_at, a.cascade_abandoned, COALESCE(a.sort_order, 0), a.created_at, a.updated_at FROM daily_schedule_slots s LEFT JOIN actions a ON a.id = s.action_id AND a.space_id = s.space_id AND a.deleted_at IS NULL LEFT JOIN events e ON e.id = a.event_id AND e.space_id = a.space_id AND e.deleted_at IS NULL WHERE s.space_id = ?1 AND s.list_date = ?2 ORDER BY s.start_time, s.id")?;
     let result = statement
         .query_map(params![space_id, list_date], |row| {
             Ok(DailyScheduleSlot {

@@ -1,4 +1,4 @@
-export type EventStatus = 0 | 1 | 2 | 3 | 4 | 5;
+export type EventStatus = 0 | 1 | 3 | 4 | 5;
 export type ActionStatus = 0 | 1 | 2;
 
 export interface StartupNotice {
@@ -13,9 +13,7 @@ export interface Event {
   category_name?: string;
   category_color?: string;
   status: EventStatus;
-  delegated_to?: string;
-  follow_up_date?: string;
-  follow_up_note?: string;
+  history_note?: string;
   delay_until?: string;
   delay_note?: string;
   abandon_reason?: string;
@@ -35,7 +33,6 @@ export interface Action {
   id: number;
   event_id?: number | null;
   event_title?: string | null;
-  delegated_to?: string;
   title: string;
   description?: string;
   estimated_hours: number;
@@ -47,7 +44,6 @@ export interface Action {
   priority: number;
   status: ActionStatus;
   completed_at?: number;
-  is_delegated_follow_up: number;
   cascade_abandoned: number;
   sort_order: number;
   created_at: number;
@@ -84,7 +80,7 @@ export interface InsightsNote { space_id: string; content: string; updated_at: n
 
 export interface ProcessEvent {
   event_id: number;
-  decision: "self" | "delegate" | "delay" | "abandon";
+  decision: "self" | "delay" | "abandon";
   quick_complete?: boolean;
   title?: string;
   target?: string;
@@ -92,8 +88,6 @@ export interface ProcessEvent {
   deadline?: string;
   initial_action_title?: string;
   action_steps?: ProcessActionStep[];
-  delegated_to?: string;
-  follow_up_date?: string;
   delay_until?: string;
   delay_note?: string;
   abandon_reason?: string;

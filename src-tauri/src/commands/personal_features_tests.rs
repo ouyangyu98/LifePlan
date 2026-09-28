@@ -1,4 +1,4 @@
-use super::{actions, event_categories as categories, events, insights};
+use super::{actions, daily_list, daily_schedule, event_categories as categories, events, insights};
 use crate::db::{current_space_id, ensure_current_space, migrations, run_migrations, AppState};
 use crate::models::*;
 use rusqlite::{params, Connection};
@@ -110,7 +110,7 @@ fn insights_round_trip_and_clear_keep_one_note() {
 
 #[test]
 fn completing_last_child_and_undo_do_not_change_parent_or_points() {
-    for status in [1, 2] {
+    for status in [1] {
         let state = state();
         let e = event(&state, None);
         state.db.lock().unwrap().execute("UPDATE events SET status=1 WHERE id=?1", [e.id]).unwrap();
@@ -156,7 +156,7 @@ fn v15_and_v16_upgrade_preserve_history_and_are_repeatable() {
         run_migrations(&mut conn).unwrap();
         run_migrations(&mut conn).unwrap();
         let version: i32 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-        assert_eq!(version, 17);
+        assert_eq!(version, migrations::CURRENT_SCHEMA_VERSION);
         let events = events::list_events(&conn).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].title, "Historical");
@@ -170,4 +170,69 @@ fn v15_and_v16_upgrade_preserve_history_and_are_repeatable() {
         let foreign_key_errors: i64 = conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).unwrap();
         assert_eq!(foreign_key_errors, 0);
     }
+}
+
+#[test]
+fn retired_process_rejected_and_active_abandon_preserves_completed_children() {
+    let state = state();
+    let e = event(&state, None);
+    let retired: ProcessEvent = serde_json::from_value(json!({
+        "event_id": e.id, "decision": "delegate"
+    })).unwrap();
+    assert_eq!(events::process_event_impl(&state, retired).unwrap_err(), "不支持的事件处理方式");
+    {
+        let conn = state.db.lock().unwrap();
+        assert_eq!(events::list_events(&conn).unwrap()[0].status, 0);
+        conn.execute("UPDATE events SET status=1,history_note='Preserved history' WHERE id=?1", [e.id]).unwrap();
+    }
+    let pending = actions::create_action_impl(&state, serde_json::from_value(json!({
+        "event_id": e.id, "title": "Pending", "estimated_hours": 0, "is_frog": 0
+    })).unwrap()).unwrap();
+    let completed = actions::create_action_impl(&state, serde_json::from_value(json!({
+        "event_id": e.id, "title": "Completed", "estimated_hours": 1, "is_frog": 0
+    })).unwrap()).unwrap();
+    actions::complete_action_impl(&state, completed.id).unwrap();
+    events::process_event_impl(&state, serde_json::from_value(json!({
+        "event_id": e.id, "decision": "abandon", "abandon_reason": "Stopped"
+    })).unwrap()).unwrap();
+    let conn = state.db.lock().unwrap();
+    let e = events::list_events(&conn).unwrap().remove(0);
+    assert_eq!(e.status, 4);
+    assert_eq!(e.history_note.as_deref(), Some("Preserved history"));
+    let children = actions::list_actions(&conn).unwrap();
+    assert_eq!(children.iter().find(|a| a.id == pending.id).unwrap().status, 2);
+    assert_eq!(children.iter().find(|a| a.id == completed.id).unwrap().status, 1);
+}
+
+#[test]
+fn migrated_actions_decode_identically_in_daily_readers_and_delete_keeps_parent() {
+    let state = state();
+    let e = event(&state, None);
+    {
+        let mut conn = state.db.lock().unwrap();
+        let space = current_space_id(&conn).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE events ADD COLUMN delegated_to TEXT;
+             ALTER TABLE actions ADD COLUMN is_delegated_follow_up INTEGER DEFAULT 0;"
+        ).unwrap();
+        conn.execute("UPDATE events SET status=2,delegated_to='Historical person',updated_at=123 WHERE id=?1", [e.id]).unwrap();
+        conn.execute("INSERT INTO actions (space_id,sync_id,event_id,title,description,estimated_hours,start_date,status,completed_at,sort_order,is_delegated_follow_up,created_at,updated_at) VALUES (?1,'old-child',?2,'Child','Description',1.5,'2026-09-28',1,456,7,1,100,456)", params![space,e.id]).unwrap();
+        let id = conn.last_insert_rowid();
+        conn.execute("INSERT INTO daily_list_items (space_id,action_id,list_date,sort_order,created_at) VALUES (?1,?2,'2026-09-28',2,100)", params![space,id]).unwrap();
+        conn.execute("INSERT INTO daily_schedule_slots (space_id,action_id,list_date,start_time,end_time,created_at,updated_at) VALUES (?1,?2,'2026-09-28','09:00','10:30',100,101)", params![space,id]).unwrap();
+        conn.pragma_update(None,"user_version",17).unwrap();
+        run_migrations(&mut conn).unwrap();
+        let expected = serde_json::to_value(&actions::list_actions(&conn).unwrap()[0]).unwrap();
+        assert_eq!(expected, serde_json::to_value(&daily_list::list_items(&conn,"2026-09-28").unwrap()[0].action).unwrap());
+        assert_eq!(expected, serde_json::to_value(&daily_schedule::slot_query(&conn,"2026-09-28").unwrap()[0].action).unwrap());
+    }
+    actions::restore_action_impl(&state, 1).unwrap();
+    actions::complete_action_impl(&state, 1).unwrap();
+    actions::delete_action_impl(&state, 1).unwrap();
+    let conn = state.db.lock().unwrap();
+    let parent = events::list_events(&conn).unwrap().remove(0);
+    assert_eq!(parent.status, 1);
+    assert_eq!(parent.updated_at, 123);
+    assert!(parent.history_note.unwrap().contains("Historical person"));
+    assert!(actions::list_actions(&conn).unwrap().is_empty());
 }

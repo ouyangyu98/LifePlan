@@ -10,36 +10,34 @@ fn row_to_action(row: &rusqlite::Row, offset: usize) -> rusqlite::Result<Action>
         id: row.get(offset)?,
         event_id: row.get(offset + 1)?,
         event_title: row.get(offset + 2)?,
-        delegated_to: row.get(offset + 3)?,
-        title: row.get(offset + 4)?,
-        description: row.get(offset + 5)?,
-        estimated_hours: row.get(offset + 6)?,
-        start_date: row.get(offset + 7)?,
-        deadline: row.get(offset + 8)?,
-        is_frog: row.get(offset + 9)?,
-        importance: row.get(offset + 10)?,
-        urgency: row.get(offset + 11)?,
-        priority: row.get(offset + 12)?,
-        status: row.get(offset + 13)?,
-        completed_at: row.get(offset + 14)?,
-        is_delegated_follow_up: row.get(offset + 15)?,
-        cascade_abandoned: row.get(offset + 16)?,
-        sort_order: row.get(offset + 17)?,
-        created_at: row.get(offset + 18)?,
-        updated_at: row.get(offset + 19)?,
+        title: row.get(offset + 3)?,
+        description: row.get(offset + 4)?,
+        estimated_hours: row.get(offset + 5)?,
+        start_date: row.get(offset + 6)?,
+        deadline: row.get(offset + 7)?,
+        is_frog: row.get(offset + 8)?,
+        importance: row.get(offset + 9)?,
+        urgency: row.get(offset + 10)?,
+        priority: row.get(offset + 11)?,
+        status: row.get(offset + 12)?,
+        completed_at: row.get(offset + 13)?,
+        cascade_abandoned: row.get(offset + 14)?,
+        sort_order: row.get(offset + 15)?,
+        created_at: row.get(offset + 16)?,
+        updated_at: row.get(offset + 17)?,
     })
 }
 
-fn list_items(conn: &Connection, list_date: &str) -> rusqlite::Result<Vec<DailyListItem>> {
+pub(super) fn list_items(conn: &Connection, list_date: &str) -> rusqlite::Result<Vec<DailyListItem>> {
     let space_id = current_space_id(conn)
         .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
     let mut statement = conn.prepare(
         "SELECT d.id, d.action_id, d.list_date, d.sort_order,
-                a.id, a.event_id, e.title, e.delegated_to,
+                a.id, a.event_id, e.title,
                 a.title, a.description, a.estimated_hours, a.start_date, a.deadline,
                 a.is_frog, a.importance, a.urgency,
                 a.priority, a.status, a.completed_at,
-                a.is_delegated_follow_up, a.cascade_abandoned, COALESCE(a.sort_order, 0),
+                a.cascade_abandoned, COALESCE(a.sort_order, 0),
                 a.created_at, a.updated_at
          FROM daily_list_items d
          JOIN actions a ON a.id = d.action_id AND a.space_id = d.space_id AND a.deleted_at IS NULL

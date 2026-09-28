@@ -14,9 +14,7 @@ pub struct Event {
     pub category_name: Option<String>,
     pub category_color: Option<String>,
     pub status: i32,
-    pub delegated_to: Option<String>,
-    pub follow_up_date: Option<String>,
-    pub follow_up_note: Option<String>,
+    pub history_note: Option<String>,
     pub delay_until: Option<String>,
     pub delay_note: Option<String>,
     pub abandon_reason: Option<String>,
@@ -88,8 +86,6 @@ pub struct ProcessEvent {
     pub deadline: Option<String>,
     pub initial_action_title: Option<String>,
     pub action_steps: Option<Vec<ProcessActionStep>>,
-    pub delegated_to: Option<String>,
-    pub follow_up_date: Option<String>,
     pub delay_until: Option<String>,
     pub delay_note: Option<String>,
     pub abandon_reason: Option<String>,
@@ -115,7 +111,6 @@ pub struct Action {
     pub id: i64,
     pub event_id: Option<i64>,
     pub event_title: Option<String>,
-    pub delegated_to: Option<String>,
     pub title: String,
     pub description: Option<String>,
     pub estimated_hours: f64,
@@ -127,7 +122,6 @@ pub struct Action {
     pub priority: i32,
     pub status: i32,
     pub completed_at: Option<i64>,
-    pub is_delegated_follow_up: i32,
     pub cascade_abandoned: i32,
     pub sort_order: i64,
     pub created_at: i64,
@@ -270,13 +264,6 @@ pub struct DailyTemplateSlot {
     pub start_time: String,
     pub end_time: String,
     pub sort_order: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DelegatedFollowUpResolution {
-    pub action_id: i64,
-    pub resolution: String,
-    pub abandon_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
