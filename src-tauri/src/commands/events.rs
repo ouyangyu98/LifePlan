@@ -8,23 +8,26 @@ fn row_to_event(row: &rusqlite::Row) -> rusqlite::Result<Event> {
     Ok(Event {
         id: row.get(0)?,
         title: row.get(1)?,
-        status: row.get(2)?,
-        delegated_to: row.get(3)?,
-        follow_up_date: row.get(4)?,
-        follow_up_note: row.get(5)?,
-        delay_until: row.get(6)?,
-        delay_note: row.get(7)?,
-        abandon_reason: row.get(8)?,
-        target: row.get(9)?,
-        deadline: row.get(10)?,
-        importance: row.get(11)?,
-        urgency: row.get(12)?,
-        action_count: row.get(13)?,
-        pending_action_count: row.get(14)?,
-        completed_action_count: row.get(15)?,
-        is_quick_completed: row.get(16)?,
-        created_at: row.get(17)?,
-        updated_at: row.get(18)?,
+        category_id: row.get(2)?,
+        category_name: row.get(3)?,
+        category_color: row.get(4)?,
+        status: row.get(5)?,
+        delegated_to: row.get(6)?,
+        follow_up_date: row.get(7)?,
+        follow_up_note: row.get(8)?,
+        delay_until: row.get(9)?,
+        delay_note: row.get(10)?,
+        abandon_reason: row.get(11)?,
+        target: row.get(12)?,
+        deadline: row.get(13)?,
+        importance: row.get(14)?,
+        urgency: row.get(15)?,
+        action_count: row.get(16)?,
+        pending_action_count: row.get(17)?,
+        completed_action_count: row.get(18)?,
+        is_quick_completed: row.get(19)?,
+        created_at: row.get(20)?,
+        updated_at: row.get(21)?,
     })
 }
 
@@ -123,14 +126,15 @@ pub fn list_events(conn: &Connection) -> rusqlite::Result<Vec<Event>> {
     restore_due_delays(conn)?;
     let space_id = current_space_id(conn).map_err(to_sql_error)?;
     let mut statement = conn.prepare(
-        "SELECT e.id, e.title, e.status, e.delegated_to, e.follow_up_date,
+        "SELECT e.id, e.title, e.category_id, c.name, c.color, e.status, e.delegated_to, e.follow_up_date,
                 e.follow_up_note, e.delay_until, e.delay_note, e.abandon_reason,
                 e.target, e.deadline,
-                 e.importance, e.urgency, COUNT(a.id),
+                e.importance, e.urgency, COUNT(a.id),
                 COALESCE(SUM(CASE WHEN a.status = 0 THEN 1 ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN a.status = 1 THEN 1 ELSE 0 END), 0),
                 e.is_quick_completed, e.created_at, e.updated_at
          FROM events e
+         LEFT JOIN event_categories c ON c.id = e.category_id AND c.space_id = e.space_id
          LEFT JOIN actions a ON a.space_id = e.space_id AND a.deleted_at IS NULL
                               AND a.event_id = e.id
          WHERE e.space_id = ?1 AND e.deleted_at IS NULL
@@ -162,11 +166,12 @@ pub(super) fn create_event_impl(state: &AppState, payload: NewEvent) -> Result<E
     }
     let conn = state.db.lock().map_err(|error| error.to_string())?;
     let space_id = current_space_id(&conn).map_err(|error| error.to_string())?;
+    super::event_categories::validate_category(&conn, &space_id, payload.category_id)?;
     let timestamp = now_millis();
     conn.execute(
-        "INSERT INTO events (space_id, sync_id, title, status, importance, urgency, priority, created_at, updated_at)
-         VALUES (?1, ?2, ?3, 0, 0, 0, 4, ?4, ?4)",
-        params![space_id, new_uuid(), title, timestamp],
+        "INSERT INTO events (space_id, sync_id, title, category_id, status, importance, urgency, priority, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 0, 0, 0, 4, ?5, ?5)",
+        params![space_id, new_uuid(), title, payload.category_id, timestamp],
     )
     .map_err(|error| error.to_string())?;
     let id = conn.last_insert_rowid();
@@ -202,18 +207,19 @@ pub(super) fn update_event_impl(state: &AppState, payload: UpdateEvent) -> Resul
         return Err("事件不存在".into());
     };
 
+    super::event_categories::validate_category(&tx, &space_id, payload.category_id)?;
     let timestamp = now_millis();
     if status == 5 {
-        // 已完成事件只允许更正标题，避免改变已完成记录的原始属性。
+        // 分类不影响完成记录；目标、积分和行动仍保持不变。
         tx.execute(
-            "UPDATE events SET title = ?1, updated_at = ?2 WHERE id = ?3 AND space_id = ?4 AND deleted_at IS NULL",
-            params![title, timestamp, payload.id, space_id],
+            "UPDATE events SET title = ?1, updated_at = ?2, category_id = ?5 WHERE id = ?3 AND space_id = ?4 AND deleted_at IS NULL",
+            params![title, timestamp, payload.id, space_id, payload.category_id],
         )
         .map_err(|error| error.to_string())?;
     } else {
         tx.execute(
-            "UPDATE events SET title = ?1, target = ?2, deadline = ?3, updated_at = ?4 WHERE id = ?5 AND space_id = ?6 AND deleted_at IS NULL",
-            params![title, payload.target.as_deref(), payload.deadline.as_deref(), timestamp, payload.id, space_id],
+            "UPDATE events SET title = ?1, target = ?2, deadline = ?3, category_id = ?4, updated_at = ?5 WHERE id = ?6 AND space_id = ?7 AND deleted_at IS NULL",
+            params![title, payload.target.as_deref(), payload.deadline.as_deref(), payload.category_id, timestamp, payload.id, space_id],
         )
         .map_err(|error| error.to_string())?;
     }

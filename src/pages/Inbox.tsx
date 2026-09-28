@@ -20,6 +20,7 @@ import {
   Modal as AntModal,
   Popconfirm,
   Select,
+  Segmented,
   Space,
   Steps,
   Tabs,
@@ -29,17 +30,21 @@ import {
 } from "antd";
 import {
   Check,
+  Columns3,
   Edit3,
   GripVertical,
   ListChecks,
   LoaderCircle,
   Plus,
   RotateCcw,
+  Rows3,
+  Settings2,
   Trash2,
 } from "lucide-react";
-import { actionsApi, eventsApi } from "@/lib/api";
+import { actionsApi, eventCategoriesApi, eventsApi } from "@/lib/api";
 import type {
   Action,
+  EventCategory,
   Event,
   ProcessActionStep,
   ProcessEvent,
@@ -47,6 +52,7 @@ import type {
 } from "@/types";
 import { userFacingError } from "@/lib/errors";
 import Modal from "@/components/ui/Modal";
+import EventCategorySelect from "@/components/ui/EventCategorySelect";
 import { track } from "@/lib/analytics";
 
 const statusLabels: Record<number, string> = {
@@ -103,10 +109,22 @@ const sortEventActions = (actions: Action[]) =>
 type ProcessMode = "self" | "delegate" | "delay" | "abandon";
 type InboxTab =
   "pending" | "events" | "delegated" | "delayed" | "abandoned" | "completed";
+type InboxView = "list" | "board";
+const inboxViewStorageKey = "lifeplan-inbox-views-v1";
+const categoryColors = [
+  "#1778FF",
+  "#13A8A8",
+  "#52C41A",
+  "#FA8C16",
+  "#EB2F96",
+  "#722ED1",
+  "#8C8C8C",
+];
 
 export default function Inbox() {
   const [events, setEvents] = useState<Event[]>([]);
   const [actions, setActions] = useState<Action[]>([]);
+  const [categories, setCategories] = useState<EventCategory[]>([]);
   const [editingAction, setEditingAction] = useState<{
     event: Event;
     action?: Action;
@@ -115,6 +133,30 @@ export default function Inbox() {
     () => new Set(),
   );
   const [filter, setFilter] = useState<InboxTab>("pending");
+  const [views, setViews] = useState<Record<InboxTab, InboxView>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(inboxViewStorageKey) || "{}") as Partial<Record<InboxTab, InboxView>>;
+      return {
+        pending: saved.pending === "board" ? "board" : "list",
+        events: saved.events === "board" ? "board" : "list",
+        delegated: saved.delegated === "board" ? "board" : "list",
+        delayed: saved.delayed === "board" ? "board" : "list",
+        abandoned: saved.abandoned === "board" ? "board" : "list",
+        completed: saved.completed === "board" ? "board" : "list",
+      };
+    } catch {
+      return { pending: "list", events: "list", delegated: "list", delayed: "list", abandoned: "list", completed: "list" };
+    }
+  });
+  const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);
+  const [categoryEditing, setCategoryEditing] = useState<EventCategory | null>(null);
+  const [categoryName, setCategoryName] = useState("");
+  const [categoryColor, setCategoryColor] = useState(categoryColors[0]);
+  const [categorySaving, setCategorySaving] = useState(false);
+  const [categoryError, setCategoryError] = useState("");
+  const [newCategoryId, setNewCategoryId] = useState<number>();
+  const [busyActions, setBusyActions] = useState<Set<number>>(() => new Set());
+  const busyActionIds = useRef(new Set<number>());
   const [newTitle, setNewTitle] = useState("");
   const [messageApi, messageContextHolder] = message.useMessage();
   const [editing, setEditing] = useState<Event | null>(null);
@@ -131,12 +173,14 @@ export default function Inbox() {
   const load = async (showLoading = true) => {
     if (showLoading) setLoading(true);
     try {
-      const [eventList, actionList] = await Promise.all([
+      const [eventList, actionList, categoryList] = await Promise.all([
         eventsApi.list(),
         actionsApi.list(),
+        eventCategoriesApi.list(),
       ]);
       setEvents(eventList);
       setActions(actionList);
+      setCategories(categoryList);
       setError("");
     } catch (cause) {
       setError(userFacingError(cause));
@@ -180,6 +224,13 @@ export default function Inbox() {
   useEffect(() => {
     void load();
   }, []);
+  const setInboxView = (view: InboxView) => {
+    const next = { ...views, [filter]: view };
+    setViews(next);
+    try {
+      localStorage.setItem(inboxViewStorageKey, JSON.stringify(next));
+    } catch { message.warning("视图已切换，但无法记住偏好"); }
+  };
   useEffect(() => {
     const state = location.state as { guideNewEvent?: boolean } | null;
     if (!state?.guideNewEvent) return;
@@ -215,7 +266,7 @@ export default function Inbox() {
   const addEvent = async () => {
     if (!newTitle.trim()) return;
     try {
-      await eventsApi.create({ title: newTitle.trim() });
+      await eventsApi.create({ title: newTitle.trim(), category_id: newCategoryId });
       track("创建事件");
       setNewTitle("");
       await load();
@@ -234,6 +285,7 @@ export default function Inbox() {
   const updateEvent = async (values: {
     title: string;
     target?: string;
+    category_id?: number;
   }) => {
     if (!editing) return;
     try {
@@ -241,6 +293,7 @@ export default function Inbox() {
         id: editing.id,
         title: values.title.trim(),
         target: values.target?.trim() || undefined,
+        category_id: values.category_id,
         // Keep legacy metadata intact without exposing it in the personal workflow.
         deadline: editing.deadline,
       });
@@ -308,9 +361,101 @@ export default function Inbox() {
       setError(userFacingError(cause));
     }
   };
+  const setActionCompleted = async (action: Action) => {
+    if (busyActionIds.current.has(action.id)) return;
+    busyActionIds.current.add(action.id);
+    setBusyActions(new Set(busyActionIds.current));
+    try {
+      if (action.status === 0) await actionsApi.complete(action.id);
+      else await actionsApi.restore(action.id);
+      await load(false);
+      message.success(action.status === 0 ? "行动已完成" : "行动已恢复");
+    } catch (cause) {
+      setError(userFacingError(cause));
+    } finally {
+      busyActionIds.current.delete(action.id);
+      setBusyActions(new Set(busyActionIds.current));
+    }
+  };
+  const openNewCategory = () => {
+    setCategoryEditing(null);
+    setCategoryName("");
+    setCategoryColor(categoryColors[0]);
+    setCategoryError("");
+  };
+  const openEditCategory = (category: EventCategory) => {
+    setCategoryEditing(category);
+    setCategoryName(category.name);
+    setCategoryColor(category.color);
+    setCategoryError("");
+  };
+  const saveCategory = async () => {
+    if (!categoryName.trim() || categorySaving) return;
+    setCategorySaving(true);
+    setCategoryError("");
+    try {
+      if (categoryEditing) {
+        const updated = await eventCategoriesApi.update({ id: categoryEditing.id, name: categoryName.trim(), color: categoryColor });
+        setCategories((current) => current.map((item) => item.id === updated.id ? updated : item));
+        setEvents((current) => current.map((event) => event.category_id === updated.id ? { ...event, category_name: updated.name, category_color: updated.color } : event));
+      } else {
+        const created = await eventCategoriesApi.create({ name: categoryName.trim(), color: categoryColor });
+        setCategories((current) => [...current, created]);
+      }
+      setCategoryEditing(null);
+      setCategoryName("");
+      message.success(categoryEditing ? "分类已更新" : "分类已添加");
+    } catch (cause) {
+      setCategoryError(userFacingError(cause));
+    } finally {
+      setCategorySaving(false);
+    }
+  };
+  const deleteCategory = async (category: EventCategory) => {
+    if (categorySaving) return;
+    setCategorySaving(true);
+    try {
+      await eventCategoriesApi.delete(category.id);
+      setCategories((current) => current.filter((item) => item.id !== category.id));
+      setEvents((current) => current.map((event) => event.category_id === category.id ? { ...event, category_id: undefined, category_name: undefined, category_color: undefined } : event));
+      if (newCategoryId === category.id) setNewCategoryId(undefined);
+      if (categoryEditing?.id === category.id) openNewCategory();
+      message.success(`“${category.name}”已删除，相关事件已归为未分类`);
+    } catch (cause) {
+      setCategoryError(userFacingError(cause));
+    } finally {
+      setCategorySaving(false);
+    }
+  };
+  const renderEventRow = (item: Event, index: number) => (
+    <EventRow
+      key={item.id}
+      item={item}
+      index={index}
+      onEdit={setEditing}
+      onProcess={(mode) => setProcessing({ event: item, mode })}
+      onDelete={() => void remove(item)}
+      onRestore={() => void restore(item)}
+      onComplete={() => void complete(item)}
+      expanded={expandedEventIds.has(item.id)}
+      onToggle={() => toggleEventExpanded(item.id)}
+      actions={actions.filter((action) => action.event_id === item.id)}
+      onAddAction={() => setEditingAction({ event: item })}
+      onEditAction={(action) => setEditingAction({ event: item, action })}
+      onDeleteAction={async (action) => {
+        await actionsApi.delete(action.id);
+        await load(false);
+        message.success("行动已删除");
+      }}
+      busyActions={busyActions}
+      onCompleteAction={(action) => void setActionCompleted(action)}
+      onRestoreAction={(action) => void setActionCompleted(action)}
+      onReorder={(actionIds) => reorderEventActions(item.id, actionIds)}
+    />
+  );
 
   return (
-    <div className="page">
+    <div className="page inbox-page">
       {messageContextHolder}
       <header className="page-header inbox-header">
         <div className="page-header-top">
@@ -350,6 +495,9 @@ export default function Inbox() {
             />
           </Form>
         </div>
+        <div className="inbox-new-category">
+          <EventCategorySelect value={newCategoryId} onChange={setNewCategoryId} categories={categories} onCreated={(category) => setCategories((current) => [...current, category])} />
+        </div>
       </header>
       <Tabs
         className="inbox-tabs"
@@ -364,6 +512,17 @@ export default function Inbox() {
           { key: "completed", label: `已完成 ${counts.completed}` },
         ]}
       />
+      <div className="inbox-view-toolbar">
+        <Space size={6} wrap>
+          <Segmented value={views[filter]} onChange={(value) => setInboxView(value as InboxView)} options={[
+            { value: "list", label: <span title="列表视图" aria-label="列表视图"><Rows3 size={16} /></span> },
+            { value: "board", label: <span title="看板视图" aria-label="看板视图"><Columns3 size={16} /></span> },
+          ]} />
+          <Button size="small" icon={<Settings2 size={14} />} onClick={() => { openNewCategory(); setCategoryManagerOpen(true); }}>
+            管理分类
+          </Button>
+        </Space>
+      </div>
       {error && (
         <Alert
           className="page-alert"
@@ -374,12 +533,10 @@ export default function Inbox() {
           onClose={() => setError("")}
         />
       )}
-      <div
-        className={`record-list ${loading || visibleEvents.length === 0 ? "record-list-empty" : ""}`}
-      >
+      <div className={`record-list ${views[filter] === "board" ? "record-board" : ""} ${loading || visibleEvents.length === 0 ? "record-list-empty" : ""}`}>
         {loading ? (
           <div className="card empty">正在加载…</div>
-        ) : visibleEvents.length === 0 ? (
+        ) : visibleEvents.length === 0 && views[filter] === "list" ? (
           <div
             className={`card ${filter === "pending" ? "onboarding-empty" : "inbox-empty-state"}`}
           >
@@ -413,31 +570,24 @@ export default function Inbox() {
             />
           </div>
         ) : (
-          visibleEvents.map((item, index) => (
-            <EventRow
-              key={item.id}
-              item={item}
-              index={index + 1}
-              onEdit={setEditing}
-              onProcess={(mode) => setProcessing({ event: item, mode })}
-              onDelete={() => void remove(item)}
-              onRestore={() => void restore(item)}
-              onComplete={() => void complete(item)}
-              expanded={expandedEventIds.has(item.id)}
-              onToggle={() => toggleEventExpanded(item.id)}
-              actions={actions.filter((action) => action.event_id === item.id)}
-              onAddAction={() => setEditingAction({ event: item })}
-              onEditAction={(action) =>
-                setEditingAction({ event: item, action })
-              }
-              onDeleteAction={async (action) => {
-                await actionsApi.delete(action.id);
-                await load(false);
-                message.success("行动已删除");
-              }}
-              onReorder={(actionIds) => reorderEventActions(item.id, actionIds)}
-            />
-          ))
+          views[filter] === "list" ? visibleEvents.map((item, index) => renderEventRow(item, index + 1)) : (
+            <div className="event-board-columns">
+              {[...categories.map((category) => ({ category, items: visibleEvents.filter((item) => item.category_id === category.id) })), { category: null, items: visibleEvents.filter((item) => !categories.some((category) => category.id === item.category_id)) }]
+                .map((column) => (
+                  <section className="event-board-column" key={column.category?.id ?? "uncategorized"}>
+                    <div className="event-board-column-head">
+                      <span className="event-board-column-title">
+                        {column.category ? <Tag color={column.category.color}>{column.category.name}</Tag> : <Tag>未分类</Tag>}
+                      </span>
+                      <Typography.Text type="secondary">{column.items.length}</Typography.Text>
+                    </div>
+                    <div className="event-board-column-body">
+                      {column.items.length === 0 ? <Typography.Text type="secondary">暂无事件</Typography.Text> : column.items.map((item, index) => renderEventRow(item, index + 1))}
+                    </div>
+                  </section>
+                ))}
+            </div>
+          )
         )}
       </div>
       <Modal
@@ -452,6 +602,7 @@ export default function Inbox() {
             initialValues={{
               title: editing.title,
               target: editing.target,
+              category_id: editing.category_id,
             }}
             onFinish={(values) => void updateEvent(values)}
           >
@@ -469,6 +620,9 @@ export default function Inbox() {
                 </Form.Item>
               </>
             )}
+            <Form.Item label="事件分类" name="category_id">
+              <EventCategorySelect categories={categories} onCreated={(category) => setCategories((current) => [...current, category])} />
+            </Form.Item>
             <div className="form-footer">
               <Button onClick={() => setEditing(null)}>取消</Button>
               <Button type="primary" htmlType="submit">
@@ -491,6 +645,58 @@ export default function Inbox() {
         onClose={() => setProcessing(null)}
         onSubmit={runProcess}
       />
+      <Modal
+        open={categoryManagerOpen}
+        title="管理事件分类"
+        onClose={() => {
+          setCategoryManagerOpen(false);
+          setCategoryEditing(null);
+        }}
+      >
+        <div className="category-manager">
+          {categoryError && <Alert type="error" message={categoryError} showIcon />}
+          <div className="category-manager-form">
+            <Input
+              value={categoryName}
+              maxLength={20}
+              aria-label="分类名称"
+              onChange={(event) => setCategoryName(event.target.value)}
+              placeholder="分类名称，例如：工作"
+              onPressEnter={() => void saveCategory()}
+            />
+            <div className="category-color-picker" aria-label="选择分类颜色">
+              {categoryColors.map((color) => (
+                <button
+                  type="button"
+                  key={color}
+                  className={`category-color-swatch ${categoryColor === color ? "is-selected" : ""}`}
+                  style={{ backgroundColor: color }}
+                  aria-label={`选择颜色 ${color}`}
+                  aria-pressed={categoryColor === color}
+                  onClick={() => setCategoryColor(color)}
+                />
+              ))}
+            </div>
+            <Button type="primary" loading={categorySaving} disabled={!categoryName.trim()} onClick={() => void saveCategory()}>
+              {categoryEditing ? "保存分类" : "新增分类"}
+            </Button>
+            {categoryEditing && <Button onClick={openNewCategory}>取消编辑</Button>}
+          </div>
+          <div className="category-manager-list">
+            {categories.length === 0 ? <Typography.Text type="secondary">还没有分类，先添加一个吧。</Typography.Text> : categories.map((category) => (
+              <div className="category-manager-item" key={category.id}>
+                <Tag color={category.color}>{category.name}</Tag>
+                <Space size={2}>
+                  <Button size="small" type="text" icon={<Edit3 size={14} />} onClick={() => openEditCategory(category)} aria-label={`编辑${category.name}`} />
+                  <Popconfirm title={`删除“${category.name}”？相关事件会变为未分类。`} onConfirm={() => void deleteCategory(category)} okText="删除" cancelText="取消">
+                    <Button size="small" type="text" danger disabled={categorySaving} icon={<Trash2 size={14} />} aria-label={`删除${category.name}`} />
+                  </Popconfirm>
+                </Space>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Modal>
       {guideNewEvent && (
         <div
           className="inbox-guide-overlay"
@@ -535,6 +741,9 @@ function EventRow({
   onAddAction,
   onEditAction,
   onDeleteAction,
+  onCompleteAction,
+  onRestoreAction,
+  busyActions,
   onReorder,
 }: {
   item: Event;
@@ -550,12 +759,15 @@ function EventRow({
   onAddAction: () => void;
   onEditAction: (action: Action) => void;
   onDeleteAction: (action: Action) => Promise<void>;
+  onCompleteAction: (action: Action) => void;
+  onRestoreAction: (action: Action) => void;
+  busyActions: Set<number>;
   onReorder: (actionIds: number[]) => Promise<void>;
 }) {
   const active = item.status === 0 || item.status === 3;
   const toggle = onToggle;
   const readOnly = item.status === 5;
-  if (item.status === 1 || readOnly)
+  if (item.status === 1 || item.status === 2 || readOnly)
     return (
       <Card
         className="record-card event-card event-card-clickable"
@@ -579,11 +791,13 @@ function EventRow({
               </Typography.Text>
               <Tag
                 className="event-status-tag"
-                color={readOnly ? "green" : "blue"}
+                color={statusColors[item.status]}
               >
-                {readOnly ? "已完成" : "进行中"}
+                {statusLabels[item.status]}
               </Tag>
               <div className="event-card-meta">
+                {item.delegated_to && <span>委托给 {item.delegated_to}</span>}
+                {item.category_name && <Tag className="event-category-tag" color={item.category_color}>{item.category_name}</Tag>}
                 <button
                   type="button"
                   className="event-action-summary"
@@ -614,7 +828,7 @@ function EventRow({
               </Button>
               {!readOnly && (
                 <>
-                  {item.completed_action_count === item.action_count &&
+                  {item.status === 1 && item.completed_action_count === item.action_count &&
                     item.action_count > 0 && (
                       <Button
                         size="small"
@@ -625,14 +839,14 @@ function EventRow({
                         完成
                       </Button>
                     )}
-                  <Button
+                  {item.status === 1 && <Button
                     size="small"
                     danger
                     type="text"
                     onClick={() => onProcess("abandon")}
                   >
                     放弃
-                  </Button>
+                  </Button>}
                 </>
               )}
               <Popconfirm
@@ -660,6 +874,9 @@ function EventRow({
             onAdd={onAddAction}
             onEdit={onEditAction}
             onDelete={onDeleteAction}
+            onComplete={onCompleteAction}
+            onRestore={onRestoreAction}
+            busyActions={busyActions}
             onReorder={onReorder}
           />
         )}
@@ -682,6 +899,7 @@ function EventRow({
       <div className="event-card-body">
         <div className="row-meta">
           <span>{formatCreatedDate(item.created_at)}</span>
+          {item.category_name && <Tag className="event-category-tag" color={item.category_color}>{item.category_name}</Tag>}
           {item.delegated_to && <span>委托给 {item.delegated_to}</span>}
           {item.delay_until && <span>推迟至 {item.delay_until}</span>}
           {item.action_count > 0 && (
@@ -760,6 +978,9 @@ function EventActionList({
   onAdd,
   onEdit,
   onDelete,
+  onComplete,
+  onRestore,
+  busyActions,
   onReorder,
 }: {
   event: Event;
@@ -768,6 +989,9 @@ function EventActionList({
   onAdd: () => void;
   onEdit: (action: Action) => void;
   onDelete: (action: Action) => Promise<void>;
+  onComplete: (action: Action) => void;
+  onRestore: (action: Action) => void;
+  busyActions: Set<number>;
   onReorder: (actionIds: number[]) => Promise<void>;
 }) {
   type DropPosition = "before" | "after";
@@ -930,6 +1154,15 @@ function EventActionList({
           readOnly
             ? undefined
             : [
+                action.status === 0 ? (
+                  <Button key="complete" size="small" type="text" loading={busyActions.has(action.id)} icon={<Check size={14} />} onClick={() => onComplete(action)}>
+                    完成
+                  </Button>
+                ) : action.status === 1 ? (
+                  <Button key="restore" size="small" type="text" loading={busyActions.has(action.id)} icon={<RotateCcw size={13} />} onClick={() => onRestore(action)}>
+                    恢复
+                  </Button>
+                ) : null,
                 <Button
                   key="edit"
                   size="small"
@@ -1059,7 +1292,7 @@ function EventActionList({
             </Typography.Text>
           )}
         </Space>
-        {!readOnly && (
+        {!readOnly && event.status === 1 && (
           <Button
             size="small"
             type="primary"

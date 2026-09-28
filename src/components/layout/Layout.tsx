@@ -2,7 +2,7 @@ import { useEffect, useState, type MouseEvent } from "react";
 import { availableMonitors, getCurrentWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
 import { isFloatingModeSaved, loadWindowGeometry, saveWindowGeometry } from "@/lib/windowPreferences";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Archive, CalendarCheck, ArrowDown, Gift, HelpCircle, LoaderCircle, Minus, Square, Timer, X } from "lucide-react";
+import { Archive, CalendarCheck, ArrowDown, Gift, HelpCircle, LoaderCircle, Minus, NotebookPen, Square, Timer, X } from "lucide-react";
 import { Layout as AntLayout, Menu, message, Tooltip } from "antd";
 import "@/App.css";
 import { exportAnalyticsLog, track } from "@/lib/analytics";
@@ -11,6 +11,7 @@ import { checkForUpdate, installUpdate, type AvailableUpdate } from "@/lib/updat
 const navItems = [
   { to: "/daily-list", icon: CalendarCheck, label: "今日事" },
   { to: "/inbox", icon: Archive, label: "事件篮" },
+  { to: "/insights", icon: NotebookPen, label: "心得" },
   { to: "/pomodoro", icon: Timer, label: "番茄钟" },
   { to: "/rewards", icon: Gift, label: "奖励池" },
 ];

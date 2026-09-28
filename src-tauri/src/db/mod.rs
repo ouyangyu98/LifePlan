@@ -149,6 +149,10 @@ pub fn run_migrations(conn: &mut Connection) -> Result<bool, DbError> {
         migrate_add_quick_completion_marker(conn)?;
         return Ok(false);
     }
+    if version == 16 {
+        migrate_add_personal_features(conn)?;
+        return Ok(false);
+    }
     if version == 13 {
         migrate_remove_projects(conn, true)?;
         return Ok(false);
@@ -166,6 +170,40 @@ pub fn run_migrations(conn: &mut Connection) -> Result<bool, DbError> {
     )))
 }
 
+fn migrate_add_personal_features(conn: &mut Connection) -> Result<(), DbError> {
+    let tx = conn.transaction().map_err(|error| DbError::MigrationFailed(error.to_string()))?;
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS event_categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            space_id TEXT NOT NULL REFERENCES local_spaces(space_id),
+            name TEXT NOT NULL,
+            color TEXT NOT NULL DEFAULT '#1778FF',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            UNIQUE(space_id, name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_event_categories_space_order
+            ON event_categories(space_id, sort_order, id);
+        CREATE TABLE IF NOT EXISTS insights_notes (
+            space_id TEXT PRIMARY KEY REFERENCES local_spaces(space_id),
+            content TEXT NOT NULL DEFAULT '',
+            updated_at INTEGER NOT NULL
+        );",
+    )
+    .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
+    if !column_exists(&tx, "events", "category_id")? {
+        tx.execute_batch(
+            "ALTER TABLE events ADD COLUMN category_id INTEGER REFERENCES event_categories(id) ON DELETE SET NULL;",
+        )
+        .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
+    }
+    validate_current_schema(&tx)?;
+    tx.pragma_update(None, "user_version", migrations::CURRENT_SCHEMA_VERSION)
+        .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
+    tx.commit().map_err(|error| DbError::MigrationFailed(error.to_string()))
+}
+
 fn migrate_add_quick_completion_marker(conn: &mut Connection) -> Result<(), DbError> {
     if !column_exists(conn, "events", "is_quick_completed")? {
         conn.execute_batch(
@@ -180,9 +218,9 @@ fn migrate_add_quick_completion_marker(conn: &mut Connection) -> Result<(), DbEr
            AND NOT EXISTS (SELECT 1 FROM actions WHERE actions.event_id = events.id AND actions.deleted_at IS NULL);",
     )
     .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
-    conn.pragma_update(None, "user_version", migrations::CURRENT_SCHEMA_VERSION)
+    conn.pragma_update(None, "user_version", 16)
         .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
-    Ok(())
+    migrate_add_personal_features(conn)
 }
 
 fn migrate_remove_projects(conn: &mut Connection, add_event_columns: bool) -> Result<(), DbError> {
@@ -256,7 +294,7 @@ fn migrate_remove_projects(conn: &mut Connection, add_event_columns: bool) -> Re
              CREATE INDEX IF NOT EXISTS idx_actions_space_deleted ON actions(space_id, deleted_at);",
         )
         .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
-        tx.pragma_update(None, "user_version", migrations::CURRENT_SCHEMA_VERSION)
+        tx.pragma_update(None, "user_version", 16)
             .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
         tx.commit()
             .map_err(|error| DbError::MigrationFailed(error.to_string()))
@@ -264,7 +302,7 @@ fn migrate_remove_projects(conn: &mut Connection, add_event_columns: bool) -> Re
     conn.execute_batch("PRAGMA foreign_keys = ON;")
         .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
     result?;
-    validate_current_schema(conn)
+    migrate_add_personal_features(conn)
 }
 
 fn table_exists(conn: &Connection, name: &str) -> Result<bool, DbError> {
@@ -319,8 +357,23 @@ fn validate_current_schema(conn: &Connection) -> Result<(), DbError> {
             "local_spaces",
             &["space_id", "created_at", "updated_at"][..],
         ),
+        (
+            "event_categories",
+            &[
+                "space_id",
+                "name",
+                "color",
+                "sort_order",
+                "created_at",
+                "updated_at",
+            ][..],
+        ),
+        ("insights_notes", &["space_id", "content", "updated_at"][..]),
         ("settings", &["key", "value", "updated_at"][..]),
-        ("events", &["space_id", "sync_id", "deleted_at"][..]),
+        (
+            "events",
+            &["space_id", "sync_id", "deleted_at", "category_id"][..],
+        ),
         (
             "actions",
             &["space_id", "sync_id", "deleted_at", "sort_order"][..],

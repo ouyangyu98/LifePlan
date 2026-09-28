@@ -28,6 +28,7 @@ const chineseCalendarLocale = {
 };
 import Layout from "@/components/layout/Layout";
 import Inbox from "@/pages/Inbox";
+import Insights from "@/pages/Insights";
 import DailyList from "@/pages/DailyList";
 import Pomodoro from "@/pages/Pomodoro";
 import Rewards from "@/pages/Rewards";
@@ -102,10 +103,9 @@ export default function App() {
       action={notice.kind === "backup_warning" ? <Button size="small" loading={retrying} onClick={() => void retryBackup()}>立即重试</Button> : undefined}
     />}
     {showOnboarding && <OnboardingCarousel onFinish={() => setShowOnboarding(false)} />}
-    <HashRouter><Routes><Route path="/" element={<Layout />}><Route index element={<Navigate to="/daily-list" replace />} /><Route path="daily-list" element={<DailyList />} /><Route path="pomodoro" element={<Pomodoro />} /><Route path="rewards" element={<Rewards />} /><Route path="inbox" element={<Inbox />} /></Route></Routes></HashRouter>
+    <HashRouter><Routes><Route path="/" element={<Layout />}><Route index element={<Navigate to="/daily-list" replace />} /><Route path="daily-list" element={<DailyList />} /><Route path="pomodoro" element={<Pomodoro />} /><Route path="rewards" element={<Rewards />} /><Route path="inbox" element={<Inbox />} /><Route path="insights" element={<Insights />} /></Route></Routes></HashRouter>
   </ConfigProvider>;
 }
-
 
 
 

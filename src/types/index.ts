@@ -9,6 +9,9 @@ export interface StartupNotice {
 export interface Event {
   id: number;
   title: string;
+  category_id?: number;
+  category_name?: string;
+  category_color?: string;
   status: EventStatus;
   delegated_to?: string;
   follow_up_date?: string;
@@ -58,13 +61,26 @@ export interface EventCompletionCheck {
   points_awarded: number;
 }
 
-export interface NewEvent { title: string }
+export interface NewEvent { title: string; category_id?: number }
 export interface UpdateEvent {
   id: number;
   title: string;
   target?: string;
   deadline?: string;
+  category_id?: number;
 }
+
+export interface EventCategory {
+  id: number;
+  name: string;
+  color: string;
+  sort_order: number;
+  created_at: number;
+  updated_at: number;
+}
+export interface NewEventCategory { name: string; color: string }
+export type UpdateEventCategory = NewEventCategory & { id: number };
+export interface InsightsNote { space_id: string; content: string; updated_at: number }
 
 export interface ProcessEvent {
   event_id: number;

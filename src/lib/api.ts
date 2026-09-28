@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Action, EventCompletionCheck, RewardCheckin, AddDailyListItem, DailyListItem, DailySchedule, DailyScheduleSlot, DailyTemplateSlot, Event, NewAction, NewEvent, NewDailySlot, NewRecurringAction, ProcessEvent, RecurringAction, ReorderDailyList, ReorderEventActions, ReorderRecurringActions, StartupNotice, UpdateAction, UpdateDailySlot, UpdateDailySlotReview, UpdateEvent, PomodoroRecord, PomodoroStatus, NewReward, Reward, RewardsOverview, UpdateReward, UpdateRecurringAction } from "@/types";
+import type { Action, EventCategory, EventCompletionCheck, RewardCheckin, AddDailyListItem, DailyListItem, DailySchedule, DailyScheduleSlot, DailyTemplateSlot, Event, InsightsNote, NewAction, NewEvent, NewEventCategory, NewDailySlot, NewRecurringAction, ProcessEvent, RecurringAction, ReorderDailyList, ReorderEventActions, ReorderRecurringActions, StartupNotice, UpdateAction, UpdateDailySlot, UpdateDailySlotReview, UpdateEvent, UpdateEventCategory, PomodoroRecord, PomodoroStatus, NewReward, Reward, RewardsOverview, UpdateReward, UpdateRecurringAction } from "@/types";
 
 type TauriWindow = Window & {
   __TAURI_INTERNALS__?: {
@@ -29,6 +29,18 @@ export const eventsApi = {
   complete: (eventId: number) => invokeCommand<EventCompletionCheck>("complete_event", { eventId }),
   restore: (eventId: number) => invokeCommand<void>("restore_event", { eventId }),
   delete: (id: number) => invokeCommand<void>("delete_event", { id }),
+};
+
+export const eventCategoriesApi = {
+  list: () => invokeCommand<EventCategory[]>("get_event_categories"),
+  create: (payload: NewEventCategory) => invokeCommand<EventCategory>("create_event_category", { payload }),
+  update: (payload: UpdateEventCategory) => invokeCommand<EventCategory>("update_event_category", { payload }),
+  delete: (id: number) => invokeCommand<void>("delete_event_category", { id }),
+};
+
+export const insightsApi = {
+  get: () => invokeCommand<InsightsNote>("get_insights_note"),
+  save: (content: string, spaceId: string) => invokeCommand<InsightsNote>("save_insights_note", { content, spaceId }),
 };
 
 export const actionsApi = {

@@ -10,6 +10,9 @@ pub struct StartupNotice {
 pub struct Event {
     pub id: i64,
     pub title: String,
+    pub category_id: Option<i64>,
+    pub category_name: Option<String>,
+    pub category_color: Option<String>,
     pub status: i32,
     pub delegated_to: Option<String>,
     pub follow_up_date: Option<String>,
@@ -32,6 +35,7 @@ pub struct Event {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewEvent {
     pub title: String,
+    pub category_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,6 +44,37 @@ pub struct UpdateEvent {
     pub title: String,
     pub target: Option<String>,
     pub deadline: Option<String>,
+    pub category_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventCategory {
+    pub id: i64,
+    pub name: String,
+    pub color: String,
+    pub sort_order: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewEventCategory {
+    pub name: String,
+    pub color: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateEventCategory {
+    pub id: i64,
+    pub name: String,
+    pub color: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InsightsNote {
+    pub space_id: String,
+    pub content: String,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

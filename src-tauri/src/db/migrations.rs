@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: i32 = 16;
+pub const CURRENT_SCHEMA_VERSION: i32 = 17;
 
 pub const INIT_MIGRATION: &str = r#"
 PRAGMA foreign_keys = OFF;
@@ -11,6 +11,22 @@ CREATE TABLE IF NOT EXISTS analytics_events ( id INTEGER PRIMARY KEY AUTOINCREME
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS event_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    space_id TEXT NOT NULL REFERENCES local_spaces(space_id),
+    name TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT '#1778FF',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(space_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_event_categories_space_order ON event_categories(space_id, sort_order, id);
+CREATE TABLE IF NOT EXISTS insights_notes (
+    space_id TEXT PRIMARY KEY REFERENCES local_spaces(space_id),
+    content TEXT NOT NULL DEFAULT '',
     updated_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS events (
@@ -29,6 +45,7 @@ CREATE TABLE IF NOT EXISTS events (
     completion_points_awarded INTEGER NOT NULL DEFAULT 0,
     is_quick_completed INTEGER NOT NULL DEFAULT 0,
     target TEXT,
+    category_id INTEGER REFERENCES event_categories(id) ON DELETE SET NULL,
     estimated_hours REAL NOT NULL DEFAULT 1,
     start_date TEXT,
     deadline TEXT,

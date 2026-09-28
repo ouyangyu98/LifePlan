@@ -166,6 +166,10 @@ pub(super) fn update_action_impl(state: &AppState, payload: UpdateAction) -> Res
 
 #[tauri::command]
 pub fn complete_action(state: State<'_, AppState>, id: i64) -> Result<Action, String> {
+    complete_action_impl(&state, id)
+}
+
+pub(super) fn complete_action_impl(state: &AppState, id: i64) -> Result<Action, String> {
     let c = state.db.lock().map_err(|e| e.to_string())?;
     let space = current_space_id(&c).map_err(|e| e.to_string())?;
     if c.execute("UPDATE actions SET status=1,completed_at=?1,updated_at=?1 WHERE id=?2 AND space_id=?3 AND status=0 AND deleted_at IS NULL",params![now_millis(),id,space]).map_err(|e|e.to_string())?==0{return Err("只有待办行动可以完成".into())}
@@ -177,6 +181,10 @@ pub fn complete_action(state: State<'_, AppState>, id: i64) -> Result<Action, St
 }
 #[tauri::command]
 pub fn restore_action(state: State<'_, AppState>, id: i64) -> Result<Action, String> {
+    restore_action_impl(&state, id)
+}
+
+pub(super) fn restore_action_impl(state: &AppState, id: i64) -> Result<Action, String> {
     let mut c = state.db.lock().map_err(|e| e.to_string())?;
     let tx = c.transaction().map_err(|e| e.to_string())?;
     let space = current_space_id(&tx).map_err(|e| e.to_string())?;
@@ -201,8 +209,6 @@ pub fn restore_action(state: State<'_, AppState>, id: i64) -> Result<Action, Str
         params![now, id, space],
     )
     .map_err(|e| e.to_string())?;
-    tx.execute("UPDATE events SET status=1,updated_at=?1 WHERE id=?2 AND space_id=?3 AND status=5 AND deleted_at IS NULL", params![now, event_id, space]).map_err(|e| e.to_string())?;
-    super::events::revoke_event_completion_tx(&tx, event_id, &space)?;
     tx.commit().map_err(|e| e.to_string())?;
     list_actions(&c)
         .map_err(|e| e.to_string())?

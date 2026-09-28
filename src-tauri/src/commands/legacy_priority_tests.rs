@@ -22,7 +22,7 @@ fn payload<T: DeserializeOwned>(value: Value) -> T {
 }
 
 fn new_event(state: &AppState) -> i64 {
-    events::create_event_impl(state, NewEvent { title: "Test".into() })
+    events::create_event_impl(state, NewEvent { title: "Test".into(), category_id: None })
         .unwrap()
         .id
 }
