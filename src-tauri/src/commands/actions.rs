@@ -1,4 +1,3 @@
-use crate::commands::calculate_priority;
 use crate::db::{current_space_id, new_uuid, now_millis};
 use crate::models::{
     Action, DelegatedFollowUpResolution, NewAction, ReorderEventActions, UpdateAction,
@@ -67,8 +66,6 @@ mod validation_tests {
             start_date: Some("2026-09-28".into()),
             deadline: None,
             is_frog: 0,
-            importance: 0,
-            urgency: 0,
         }
     }
 
@@ -101,6 +98,10 @@ pub fn get_actions(state: State<'_, AppState>) -> Result<Vec<Action>, String> {
 }
 #[tauri::command]
 pub fn create_action(state: State<'_, AppState>, payload: NewAction) -> Result<Action, String> {
+    create_action_impl(&state, payload)
+}
+
+pub(super) fn create_action_impl(state: &AppState, payload: NewAction) -> Result<Action, String> {
     validate(&payload)?;
     let c = state.db.lock().map_err(|e| e.to_string())?;
     let space = current_space_id(&c).map_err(|e| e.to_string())?;
@@ -122,7 +123,7 @@ pub fn create_action(state: State<'_, AppState>, payload: NewAction) -> Result<A
     } else {
         0
     };
-    c.execute("INSERT INTO actions (space_id,sync_id,event_id,title,description,estimated_hours,start_date,deadline,is_frog,importance,urgency,priority,sort_order,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?14)",params![space,new_uuid(),payload.event_id,payload.title.trim(),payload.description,payload.estimated_hours,payload.start_date,payload.deadline,payload.is_frog,payload.importance,payload.urgency,calculate_priority(payload.importance,payload.urgency),order,now]).map_err(|e|e.to_string())?;
+    c.execute("INSERT INTO actions (space_id,sync_id,event_id,title,description,estimated_hours,start_date,deadline,is_frog,importance,urgency,priority,sort_order,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,0,0,4,?10,?11,?11)",params![space,new_uuid(),payload.event_id,payload.title.trim(),payload.description,payload.estimated_hours,payload.start_date,payload.deadline,payload.is_frog,order,now]).map_err(|e|e.to_string())?;
     let id = c.last_insert_rowid();
     list_actions(&c)
         .map_err(|e| e.to_string())?
@@ -132,6 +133,10 @@ pub fn create_action(state: State<'_, AppState>, payload: NewAction) -> Result<A
 }
 #[tauri::command]
 pub fn update_action(state: State<'_, AppState>, payload: UpdateAction) -> Result<Action, String> {
+    update_action_impl(&state, payload)
+}
+
+pub(super) fn update_action_impl(state: &AppState, payload: UpdateAction) -> Result<Action, String> {
     let base = NewAction {
         event_id: None,
         title: payload.title.clone(),
@@ -140,8 +145,6 @@ pub fn update_action(state: State<'_, AppState>, payload: UpdateAction) -> Resul
         start_date: payload.start_date.clone(),
         deadline: payload.deadline.clone(),
         is_frog: payload.is_frog,
-        importance: payload.importance,
-        urgency: payload.urgency,
     };
     validate(&base)?;
     let c = state.db.lock().map_err(|e| e.to_string())?;
@@ -150,7 +153,7 @@ pub fn update_action(state: State<'_, AppState>, payload: UpdateAction) -> Resul
     if event_status == Some(5) {
         return Err("已完成事件的行动不能编辑".into());
     }
-    let n = c.execute("UPDATE actions SET title=?1,description=?2,estimated_hours=?3,start_date=?4,deadline=?5,is_frog=?6,importance=?7,urgency=?8,priority=?9,updated_at=?10 WHERE id=?11 AND space_id=?12 AND deleted_at IS NULL", params![payload.title.trim(), payload.description, payload.estimated_hours, payload.start_date, payload.deadline, payload.is_frog, payload.importance, payload.urgency, calculate_priority(payload.importance, payload.urgency), now_millis(), payload.id, space]).map_err(|e| e.to_string())?;
+    let n = c.execute("UPDATE actions SET title=?1,description=?2,estimated_hours=?3,start_date=?4,deadline=?5,is_frog=?6,updated_at=?7 WHERE id=?8 AND space_id=?9 AND deleted_at IS NULL", params![payload.title.trim(), payload.description, payload.estimated_hours, payload.start_date, payload.deadline, payload.is_frog, now_millis(), payload.id, space]).map_err(|e| e.to_string())?;
     if n == 0 {
         return Err("行动不存在".into());
     }

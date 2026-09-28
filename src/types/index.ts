@@ -64,8 +64,6 @@ export interface UpdateEvent {
   title: string;
   target?: string;
   deadline?: string;
-  importance?: number;
-  urgency?: number;
 }
 
 export interface ProcessEvent {
@@ -76,8 +74,6 @@ export interface ProcessEvent {
   target?: string;
   start_date?: string;
   deadline?: string;
-  importance?: number;
-  urgency?: number;
   initial_action_title?: string;
   action_steps?: ProcessActionStep[];
   delegated_to?: string;
@@ -101,8 +97,6 @@ export interface NewAction {
   start_date?: string;
   deadline?: string;
   is_frog: number;
-  importance: number;
-  urgency: number;
 }
 export type UpdateAction = Omit<NewAction, "event_id"> & { id: number };
 export interface ReorderEventActions { event_id: number; action_ids: number[] }
@@ -126,8 +120,6 @@ export interface NewRecurringAction {
   title: string;
   estimated_hours: number;
   is_frog: number;
-  importance: number;
-  urgency: number;
   frequency_unit: RecurringFrequencyUnit;
   frequency_count: number;
 }

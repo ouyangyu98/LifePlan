@@ -1,4 +1,3 @@
-use crate::commands::calculate_priority;
 use crate::db::{current_space_id, new_uuid, now_millis};
 use crate::models::{
     Action, NewRecurringAction, RecurringAction, ReorderRecurringActions, UpdateRecurringAction,
@@ -74,6 +73,13 @@ pub fn create_recurring_action(
     state: State<'_, AppState>,
     payload: NewRecurringAction,
 ) -> Result<RecurringAction, String> {
+    create_recurring_action_impl(&state, payload)
+}
+
+pub(super) fn create_recurring_action_impl(
+    state: &AppState,
+    payload: NewRecurringAction,
+) -> Result<RecurringAction, String> {
     validate_payload(&payload)?;
     let conn = state.db.lock().map_err(|error| error.to_string())?;
     let space_id = current_space_id(&conn).map_err(|error| error.to_string())?;
@@ -85,19 +91,15 @@ pub fn create_recurring_action(
         )
         .map_err(|error| error.to_string())?;
     let timestamp = now_millis();
-    let priority = calculate_priority(payload.importance, payload.urgency);
     conn.execute(
         "INSERT INTO recurring_actions (space_id, sync_id, title, estimated_hours, is_frog, importance, urgency, priority, frequency_unit, frequency_count, sort_order, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 4, ?6, ?7, ?8, ?9, ?9)",
         params![
             space_id,
             new_uuid(),
             payload.title.trim(),
             payload.estimated_hours,
             payload.is_frog,
-            payload.importance,
-            payload.urgency,
-            priority,
             payload.frequency_unit,
             payload.frequency_count,
             sort_order,
@@ -118,12 +120,17 @@ pub fn update_recurring_action(
     state: State<'_, AppState>,
     payload: UpdateRecurringAction,
 ) -> Result<RecurringAction, String> {
+    update_recurring_action_impl(&state, payload)
+}
+
+pub(super) fn update_recurring_action_impl(
+    state: &AppState,
+    payload: UpdateRecurringAction,
+) -> Result<RecurringAction, String> {
     let values = NewRecurringAction {
         title: payload.title,
         estimated_hours: payload.estimated_hours,
         is_frog: payload.is_frog,
-        importance: payload.importance,
-        urgency: payload.urgency,
         frequency_unit: payload.frequency_unit,
         frequency_count: payload.frequency_count,
     };
@@ -131,21 +138,16 @@ pub fn update_recurring_action(
     let conn = state.db.lock().map_err(|error| error.to_string())?;
     let space_id = current_space_id(&conn).map_err(|error| error.to_string())?;
     let timestamp = now_millis();
-    let priority = calculate_priority(values.importance, values.urgency);
     let changed = conn
         .execute(
             "UPDATE recurring_actions
-             SET title = ?1, estimated_hours = ?2, is_frog = ?3, importance = ?4,
-                 urgency = ?5, priority = ?6, frequency_unit = ?7, frequency_count = ?8,
-                 updated_at = ?9
-             WHERE id = ?10 AND space_id = ?11 AND deleted_at IS NULL",
+             SET title = ?1, estimated_hours = ?2, is_frog = ?3,
+                 frequency_unit = ?4, frequency_count = ?5, updated_at = ?6
+             WHERE id = ?7 AND space_id = ?8 AND deleted_at IS NULL",
             params![
                 values.title.trim(),
                 values.estimated_hours,
                 values.is_frog,
-                values.importance,
-                values.urgency,
-                priority,
                 values.frequency_unit,
                 values.frequency_count,
                 timestamp,
@@ -226,6 +228,13 @@ pub fn create_action_from_recurring(
     state: State<'_, AppState>,
     recurring_action_id: i64,
 ) -> Result<Action, String> {
+    create_action_from_recurring_impl(&state, recurring_action_id)
+}
+
+pub(super) fn create_action_from_recurring_impl(
+    state: &AppState,
+    recurring_action_id: i64,
+) -> Result<Action, String> {
     let conn = state.db.lock().map_err(|error| error.to_string())?;
     let space_id = current_space_id(&conn).map_err(|error| error.to_string())?;
     let template: (String, f64) = conn
@@ -240,8 +249,8 @@ pub fn create_action_from_recurring(
     let timestamp = now_millis();
     conn.execute(
         "INSERT INTO actions (space_id, sync_id, title, estimated_hours, is_frog, importance, urgency, priority, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
-        params![space_id, new_uuid(), template.0, template.1, 0, 0, 0, calculate_priority(0, 0), timestamp],
+         VALUES (?1, ?2, ?3, ?4, 0, 0, 0, 4, ?5, ?5)",
+        params![space_id, new_uuid(), template.0, template.1, timestamp],
     )
     .map_err(|error| error.to_string())?;
     let action_id = conn.last_insert_rowid();

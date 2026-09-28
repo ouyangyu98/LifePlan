@@ -1,4 +1,3 @@
-use crate::commands::calculate_priority;
 use crate::db::{current_space_id, new_uuid, now_millis};
 use crate::models::{Event, EventCompletionCheck, NewEvent, ProcessEvent, UpdateEvent};
 use crate::AppState;
@@ -153,6 +152,10 @@ pub fn get_events(state: State<'_, AppState>) -> Result<Vec<Event>, String> {
 
 #[tauri::command]
 pub fn create_event(state: State<'_, AppState>, payload: NewEvent) -> Result<Event, String> {
+    create_event_impl(&state, payload)
+}
+
+pub(super) fn create_event_impl(state: &AppState, payload: NewEvent) -> Result<Event, String> {
     let title = payload.title.trim();
     if title.is_empty() {
         return Err("事件标题不能为空".into());
@@ -161,8 +164,8 @@ pub fn create_event(state: State<'_, AppState>, payload: NewEvent) -> Result<Eve
     let space_id = current_space_id(&conn).map_err(|error| error.to_string())?;
     let timestamp = now_millis();
     conn.execute(
-        "INSERT INTO events (space_id, sync_id, title, status, created_at, updated_at)
-         VALUES (?1, ?2, ?3, 0, ?4, ?4)",
+        "INSERT INTO events (space_id, sync_id, title, status, importance, urgency, priority, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 0, 0, 0, 4, ?4, ?4)",
         params![space_id, new_uuid(), title, timestamp],
     )
     .map_err(|error| error.to_string())?;
@@ -176,6 +179,10 @@ pub fn create_event(state: State<'_, AppState>, payload: NewEvent) -> Result<Eve
 
 #[tauri::command]
 pub fn update_event(state: State<'_, AppState>, payload: UpdateEvent) -> Result<Event, String> {
+    update_event_impl(&state, payload)
+}
+
+pub(super) fn update_event_impl(state: &AppState, payload: UpdateEvent) -> Result<Event, String> {
     let title = payload.title.trim();
     if title.is_empty() {
         return Err("事件标题不能为空".into());
@@ -204,21 +211,9 @@ pub fn update_event(state: State<'_, AppState>, payload: UpdateEvent) -> Result<
         )
         .map_err(|error| error.to_string())?;
     } else {
-        let importance = payload.importance.unwrap_or(1);
-        let urgency = payload.urgency.unwrap_or(1);
-        if ![0, 1].contains(&importance) || ![0, 1].contains(&urgency) {
-            return Err("重要程度和紧急程度无效".into());
-        }
-        let priority = calculate_priority(importance, urgency);
         tx.execute(
-            "UPDATE events SET title = ?1, target = ?2, deadline = ?3, importance = ?4, urgency = ?5, priority = ?6, updated_at = ?7 WHERE id = ?8 AND space_id = ?9 AND deleted_at IS NULL",
-            params![title, payload.target.as_deref(), payload.deadline.as_deref(), importance, urgency, priority, timestamp, payload.id, space_id],
-        )
-        .map_err(|error| error.to_string())?;
-        // 事件属性同步到其全部行动，保证事件成为唯一的归属来源。
-        tx.execute(
-            "UPDATE actions SET importance = ?1, urgency = ?2, priority = ?3, updated_at = ?4 WHERE space_id = ?5 AND deleted_at IS NULL AND event_id = ?6",
-            params![importance, urgency, priority, timestamp, space_id, payload.id],
+            "UPDATE events SET title = ?1, target = ?2, deadline = ?3, updated_at = ?4 WHERE id = ?5 AND space_id = ?6 AND deleted_at IS NULL",
+            params![title, payload.target.as_deref(), payload.deadline.as_deref(), timestamp, payload.id, space_id],
         )
         .map_err(|error| error.to_string())?;
     }
@@ -231,6 +226,10 @@ pub fn update_event(state: State<'_, AppState>, payload: UpdateEvent) -> Result<
 }
 #[tauri::command]
 pub fn process_event(state: State<'_, AppState>, payload: ProcessEvent) -> Result<(), String> {
+    process_event_impl(&state, payload)
+}
+
+pub(super) fn process_event_impl(state: &AppState, payload: ProcessEvent) -> Result<(), String> {
     let mut conn = state.db.lock().map_err(|error| error.to_string())?;
     let tx = conn.transaction().map_err(|error| error.to_string())?;
     let space_id = current_space_id(&tx).map_err(|error| error.to_string())?;
@@ -275,14 +274,12 @@ pub fn process_event(state: State<'_, AppState>, payload: ProcessEvent) -> Resul
                     return Err("行动开始日期不能晚于事件截止日期".into());
                 }
             }
-            let importance = payload.importance.unwrap_or(1);
-            let urgency = payload.urgency.unwrap_or(1);
             validate_dates(&payload.start_date, &payload.deadline)?;
             for step in action_steps {
-                tx.execute("INSERT INTO actions (space_id, sync_id, event_id, title, estimated_hours, start_date, deadline, importance, urgency, priority, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)", params![space_id, new_uuid(), payload.event_id, step.title.trim(), step.estimated_hours, step.start_date.as_deref(), payload.deadline.as_deref(), importance, urgency, calculate_priority(importance, urgency), timestamp]).map_err(|error| error.to_string())?;
+                tx.execute("INSERT INTO actions (space_id, sync_id, event_id, title, estimated_hours, start_date, deadline, importance, urgency, priority, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 0, 4, ?8, ?8)", params![space_id, new_uuid(), payload.event_id, step.title.trim(), step.estimated_hours, step.start_date.as_deref(), payload.deadline.as_deref(), timestamp]).map_err(|error| error.to_string())?;
             }
             let event_status = if quick_complete { 5 } else { 1 };
-            tx.execute("UPDATE events SET title = ?1, target = ?2, deadline = ?3, importance = ?4, urgency = ?5, priority = ?6, status = ?7, is_quick_completed = ?8, updated_at = ?9 WHERE id = ?10 AND space_id = ?11 AND deleted_at IS NULL", params![payload.title.as_deref().unwrap_or(""), payload.target.as_deref(), payload.deadline.as_deref(), importance, urgency, calculate_priority(importance, urgency), event_status, i32::from(quick_complete), timestamp, payload.event_id, space_id]).map_err(|error| error.to_string())?;
+            tx.execute("UPDATE events SET title = ?1, target = ?2, deadline = ?3, status = ?4, is_quick_completed = ?5, updated_at = ?6 WHERE id = ?7 AND space_id = ?8 AND deleted_at IS NULL", params![payload.title.as_deref().unwrap_or(""), payload.target.as_deref(), payload.deadline.as_deref(), event_status, i32::from(quick_complete), timestamp, payload.event_id, space_id]).map_err(|error| error.to_string())?;
             if quick_complete {
                 award_event_completion_tx(&tx, payload.event_id, &space_id, 0)?;
             }
@@ -320,7 +317,7 @@ pub fn process_event(state: State<'_, AppState>, payload: ProcessEvent) -> Resul
                  (space_id, sync_id, event_id, title, description, estimated_hours,
                   start_date, is_frog, importance, urgency, priority,
                   is_delegated_follow_up, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, 0, 0, 0, 1, 1, ?7, ?7)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, 0, 0, 0, 4, 1, ?7, ?7)",
                 params![
                     space_id,
                     new_uuid(),

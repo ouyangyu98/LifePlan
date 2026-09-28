@@ -243,8 +243,6 @@ export default function Inbox() {
         target: values.target?.trim() || undefined,
         // Keep legacy metadata intact without exposing it in the personal workflow.
         deadline: editing.deadline,
-        importance: editing.importance,
-        urgency: editing.urgency,
       });
       setEditing(null);
       await load();
@@ -1117,8 +1115,6 @@ function EventActionModal({
       start_date: toDateString(values.start_date as Dayjs | string | undefined),
       deadline: data.action?.deadline,
       is_frog: data.action?.is_frog ?? 0,
-      importance: data.action?.importance ?? 0,
-      urgency: data.action?.urgency ?? 0,
     };
     try {
       if (data.action)
@@ -1274,8 +1270,6 @@ function ProcessModal({
           start_date: toDateString(
             values.start_date as Dayjs | string | undefined,
           ),
-          importance: 0,
-          urgency: 0,
           action_steps: [],
         });
         return;
@@ -1301,8 +1295,6 @@ function ProcessModal({
         (savedEventValues.start_date ?? values.start_date) as
           Dayjs | string | undefined,
       ),
-      importance: 0,
-      urgency: 0,
       action_steps: steps,
       delegated_to: values.delegated_to as string,
       follow_up_date: toDateString(

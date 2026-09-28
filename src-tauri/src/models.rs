@@ -40,8 +40,6 @@ pub struct UpdateEvent {
     pub title: String,
     pub target: Option<String>,
     pub deadline: Option<String>,
-    pub importance: Option<i32>,
-    pub urgency: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,8 +51,6 @@ pub struct ProcessEvent {
     pub target: Option<String>,
     pub start_date: Option<String>,
     pub deadline: Option<String>,
-    pub importance: Option<i32>,
-    pub urgency: Option<i32>,
     pub initial_action_title: Option<String>,
     pub action_steps: Option<Vec<ProcessActionStep>>,
     pub delegated_to: Option<String>,
@@ -112,8 +108,6 @@ pub struct NewAction {
     pub start_date: Option<String>,
     pub deadline: Option<String>,
     pub is_frog: i32,
-    pub importance: i32,
-    pub urgency: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,8 +119,6 @@ pub struct UpdateAction {
     pub start_date: Option<String>,
     pub deadline: Option<String>,
     pub is_frog: i32,
-    pub importance: i32,
-    pub urgency: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,8 +148,6 @@ pub struct NewRecurringAction {
     pub title: String,
     pub estimated_hours: f64,
     pub is_frog: i32,
-    pub importance: i32,
-    pub urgency: i32,
     pub frequency_unit: String,
     pub frequency_count: i32,
 }
@@ -168,8 +158,6 @@ pub struct UpdateRecurringAction {
     pub title: String,
     pub estimated_hours: f64,
     pub is_frog: i32,
-    pub importance: i32,
-    pub urgency: i32,
     pub frequency_unit: String,
     pub frequency_count: i32,
 }
