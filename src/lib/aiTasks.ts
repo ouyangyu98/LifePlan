@@ -20,8 +20,7 @@ export function aiTaskMinutes(task: AiTask): number {
 }
 
 export function dailyAiSummary(tasks: readonly AiTask[], slots: readonly DailyScheduleSlot[]) {
-  const actionIds = new Set(slots.flatMap((slot) => slot.action ? [slot.action.id] : []));
-  const scheduled = tasks.filter((task) => actionIds.has(task.action_id));
+  const scheduled = [...aiTasksBySlot(tasks, slots).values()].flat();
   return {
     count: scheduled.length,
     minutes: scheduled.reduce((sum, task) => sum + aiTaskMinutes(task), 0),
@@ -31,11 +30,14 @@ export function dailyAiSummary(tasks: readonly AiTask[], slots: readonly DailySc
   };
 }
 
-// One task list per action/day, even when an action occupies several slots.
-export function aiTaskAnchorSlots(slots: readonly DailyScheduleSlot[]): Map<number, number> {
-  const anchors = new Map<number, number>();
-  for (const slot of slots) {
-    if (slot.action && !anchors.has(slot.action.id)) anchors.set(slot.action.id, slot.id);
+export function aiTasksBySlot(tasks: readonly AiTask[], slots: readonly DailyScheduleSlot[]): Map<number, AiTask[]> {
+  const bySlot = new Map<number, AiTask[]>();
+  const slotsById = new Map(slots.map(slot => [slot.id, slot]));
+  for (const task of tasks) {
+    if (task.slot_id == null) continue;
+    const slot = slotsById.get(task.slot_id);
+    if (slot?.action?.id !== task.action_id || slot.list_date !== task.list_date) continue;
+    bySlot.set(slot.id, [...(bySlot.get(slot.id) ?? []), task]);
   }
-  return anchors;
+  return bySlot;
 }

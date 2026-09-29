@@ -162,6 +162,7 @@ export interface AiTaskFields {
 }
 export interface AiTask extends AiTaskFields {
   id: number;
+  slot_id: number | null;
   action_id: number;
   linked_action_id: number;
   title: string;
@@ -172,7 +173,7 @@ export interface AiTask extends AiTaskFields {
   created_at: number;
   updated_at: number;
 }
-export interface NewAiTask extends AiTaskFields { action_id: number; linked_action_id: number; list_date: string }
+export interface NewAiTask extends AiTaskFields { slot_id: number; action_id: number; linked_action_id: number; list_date: string }
 export interface UpdateAiTask extends AiTaskFields { id: number; expected_updated_at: number }
 export interface NewDailySlot { list_date: string; start_time: string; end_time: string }
 export interface UpdateDailySlot { id: number; start_time: string; end_time: string }

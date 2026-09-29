@@ -42,7 +42,7 @@ fn fields() -> AiTaskFields {
 }
 
 fn payload() -> NewAiTask {
-    NewAiTask { action_id: 101, linked_action_id: 103, list_date: "2026-09-29".into(), fields: fields() }
+    NewAiTask { slot_id: 201, action_id: 101, linked_action_id: 103, list_date: "2026-09-29".into(), fields: fields() }
 }
 
 #[test]
@@ -125,6 +125,7 @@ fn ai_tasks_stay_with_action_when_slots_swap_and_are_not_duplicated() {
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].id, task.id);
     assert_eq!(tasks[0].action_id, 101);
+    assert_eq!(tasks[0].slot_id, Some(203));
     assert_eq!(tasks[0].start_time.as_deref(), Some("09:00"));
     assert_eq!(tasks[0].end_time.as_deref(), Some("11:30"));
     // Removing or replacing the daily assignment must not discard task records.
@@ -172,7 +173,7 @@ fn v18_upgrade_is_repeatable_and_preserves_existing_schedule() {
     run_migrations(&mut conn).unwrap();
     run_migrations(&mut conn).unwrap();
     let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-    assert_eq!(version, 20);
+    assert_eq!(version, 21);
     assert!(ai_tasks::list_tasks(&conn, "2026-09-29").unwrap().is_empty());
     assert_eq!(serde_json::to_value(daily_schedule::slot_query(&conn, "2026-09-29").unwrap()).unwrap(), before);
     let space = current_space_id(&conn).unwrap();
@@ -187,7 +188,7 @@ fn v18_upgrade_is_repeatable_and_preserves_existing_schedule() {
 fn pool_edits_completion_and_restore_are_shared_and_stale_writes_are_rejected() {
     let state = state();
     let task = ai_tasks::create_task_impl(&state, payload()).unwrap();
-    let mut next_day = payload(); next_day.list_date = "2026-09-30".into();
+    let mut next_day = payload(); next_day.list_date = "2026-09-30".into(); next_day.slot_id = 205;
     ai_tasks::create_task_impl(&state, next_day).unwrap();
     {
         let conn = state.db.lock().unwrap();
@@ -370,4 +371,150 @@ fn eventless_support_does_not_expose_actions_with_missing_or_foreign_events() {
         assert!(ai_tasks::list_tasks(&conn, "2026-09-29").unwrap().is_empty());
         conn.execute("DELETE FROM ai_tasks", []).unwrap();
     }
+}
+
+#[test]
+fn attachments_remember_the_selected_slot_independently_of_planned_times() {
+    let state = state();
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute("UPDATE daily_schedule_slots SET start_time='13:30',end_time='14:30' WHERE id=202", []).unwrap();
+    }
+    let morning = ai_tasks::create_task_impl(&state, payload()).unwrap();
+    let mut request = payload();
+    request.slot_id = 202;
+    request.linked_action_id = 104;
+    request.fields.start_time = Some("13:30".into());
+    request.fields.end_time = Some("14:30".into());
+    let afternoon = ai_tasks::create_task_impl(&state, request).unwrap();
+    assert_eq!(morning.slot_id, Some(201));
+    assert_eq!(afternoon.slot_id, Some(202));
+    let mut changes = fields(); changes.start_time = None; changes.end_time = None;
+    let edited = ai_tasks::update_task_impl(&state, UpdateAiTask {
+        id: afternoon.id, expected_updated_at: afternoon.updated_at, fields: changes,
+    }).unwrap();
+    assert_eq!(edited.slot_id, Some(202));
+    // Even identical parent actions can trade their distinct occurrence content.
+    daily_schedule::move_slot_action_impl(&state, "2026-09-29", 201, 202).unwrap();
+    let moved = ai_tasks::list_tasks(&state.db.lock().unwrap(), "2026-09-29").unwrap();
+    assert_eq!(moved.iter().find(|task| task.id == morning.id).unwrap().slot_id, Some(202));
+    assert_eq!(moved.iter().find(|task| task.id == afternoon.id).unwrap().slot_id, Some(201));
+    daily_schedule::move_slot_action_impl(&state, "2026-09-29", 202, 204).unwrap();
+    let moved = ai_tasks::list_tasks(&state.db.lock().unwrap(), "2026-09-29").unwrap();
+    assert_eq!(moved.iter().find(|task| task.id == morning.id).unwrap().slot_id, Some(204));
+    assert_eq!(moved.iter().find(|task| task.id == afternoon.id).unwrap().slot_id, Some(201));
+    assert!(ai_tasks::update_task_impl(&state, UpdateAiTask {
+        id: afternoon.id, expected_updated_at: edited.updated_at, fields: fields(),
+    }).is_err());
+}
+
+#[test]
+fn invalid_or_changed_attachment_slots_are_rejected() {
+    let state = state();
+    for slot_id in [999, 203, 204, 205] {
+        let mut request = payload(); request.slot_id = slot_id;
+        assert!(ai_tasks::create_task_impl(&state, request).is_err());
+    }
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute("INSERT INTO local_spaces(space_id,created_at,updated_at) VALUES('slot-other',1,1)", []).unwrap();
+        conn.execute("UPDATE daily_schedule_slots SET space_id='slot-other' WHERE id=201", []).unwrap();
+    }
+    assert!(ai_tasks::create_task_impl(&state, payload()).is_err());
+    assert!(ai_tasks::list_tasks(&state.db.lock().unwrap(), "2026-09-29").unwrap().is_empty());
+}
+
+#[test]
+fn failed_attachment_move_rolls_back_action_review_and_location() {
+    let state = state();
+    let task = ai_tasks::create_task_impl(&state, payload()).unwrap();
+    let before = serde_json::to_value(daily_schedule::slot_query(&state.db.lock().unwrap(), "2026-09-29").unwrap()).unwrap();
+    state.db.lock().unwrap().execute_batch(
+        "CREATE TRIGGER fail_ai_move BEFORE UPDATE OF slot_id ON ai_tasks
+         BEGIN SELECT RAISE(ABORT,'test move failure'); END;",
+    ).unwrap();
+    assert!(daily_schedule::move_slot_action_impl(&state, "2026-09-29", 201, 203).is_err());
+    let conn = state.db.lock().unwrap();
+    let after = ai_tasks::list_tasks(&conn, "2026-09-29").unwrap().remove(0);
+    assert_eq!(after.slot_id, task.slot_id);
+    assert_eq!(after.updated_at, task.updated_at);
+    assert_eq!(serde_json::to_value(daily_schedule::slot_query(&conn, "2026-09-29").unwrap()).unwrap(), before);
+}
+
+#[test]
+fn deleting_an_attachment_slot_preserves_task_without_reanchoring_it() {
+    let state = state();
+    let task = ai_tasks::create_task_impl(&state, payload()).unwrap();
+    let conn = state.db.lock().unwrap();
+    conn.execute("DELETE FROM daily_schedule_slots WHERE id=201", []).unwrap();
+    let preserved = ai_tasks::list_tasks(&conn, "2026-09-29").unwrap().remove(0);
+    assert_eq!(preserved.id, task.id);
+    assert_eq!(preserved.slot_id, None);
+    assert_eq!(preserved.title, task.title);
+    assert_eq!(preserved.result, task.result);
+}
+
+fn legacy_v20(conn: &mut Connection) {
+    conn.execute_batch(
+        "DROP INDEX idx_ai_tasks_slot;
+         ALTER TABLE ai_tasks DROP COLUMN slot_id;
+         UPDATE daily_schedule_slots SET start_time='13:30',end_time='14:30' WHERE id=202;",
+    ).unwrap();
+    conn.pragma_update(None, "user_version", 20).unwrap();
+    let space = current_space_id(conn).unwrap();
+    conn.execute(
+        "INSERT INTO ai_tasks(id,space_id,action_id,linked_action_id,list_date,title,notes,result,status,start_time,end_time,created_at,updated_at)
+         VALUES(301,?1,101,103,'2026-09-29','Snapshot','Saved notes','Saved result','running','13:30','14:30',10,20),
+               (302,?1,101,104,'2026-09-29','Snapshot','Notes','Result','queued','13:45','14:30',11,21),
+               (303,?1,101,103,'2026-09-30','Snapshot','Notes','Result','queued',NULL,NULL,12,22),
+               (304,?1,101,104,'2026-10-01','Snapshot','Notes','Result','queued','13:30','14:30',13,23),
+               (305,?1,101,103,'2026-10-02','Snapshot','Notes','Result','queued','13:30','14:30',14,24)",
+        [&space],
+    ).unwrap();
+    conn.execute(
+        "INSERT INTO local_spaces(space_id,created_at,updated_at) VALUES('slot-other',1,1)", [],
+    ).unwrap();
+    conn.execute(
+        "INSERT INTO daily_schedule_slots(space_id,list_date,start_time,end_time,action_id,created_at,updated_at)
+         VALUES('slot-other','2026-10-02','13:30','14:30',101,1,1)", [],
+    ).unwrap();
+}
+
+#[test]
+fn v20_upgrade_recovers_afternoon_attachments_once_and_preserves_all_records() {
+    let state = state();
+    let mut conn = state.db.lock().unwrap();
+    legacy_v20(&mut conn);
+    run_migrations(&mut conn).unwrap();
+    run_migrations(&mut conn).unwrap();
+    let tasks = ai_tasks::list_tasks(&conn, "2026-09-29").unwrap();
+    assert_eq!(tasks.len(), 2);
+    assert!(tasks.iter().all(|task| task.slot_id == Some(202)));
+    assert_eq!(tasks[0].result, "Saved result");
+    assert_eq!(tasks[0].status.as_str(), "running");
+    assert_eq!(tasks[0].created_at, 10);
+    assert_eq!(tasks[0].updated_at, 20);
+    assert_eq!(tasks[0].start_time.as_deref(), Some("13:30"));
+    assert_eq!(ai_tasks::list_tasks(&conn, "2026-09-30").unwrap()[0].slot_id, Some(205));
+    assert_eq!(ai_tasks::list_tasks(&conn, "2026-10-01").unwrap()[0].slot_id, None);
+    assert_eq!(ai_tasks::list_tasks(&conn, "2026-10-02").unwrap()[0].slot_id, None);
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM ai_tasks", [], |row| row.get::<_, i64>(0)).unwrap(), 5);
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM actions", [], |row| row.get::<_, i64>(0)).unwrap(), 4);
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i32>(0)).unwrap(), 21);
+    conn.execute("UPDATE daily_schedule_slots SET start_time='16:00',end_time='17:00' WHERE id=202", []).unwrap();
+    run_migrations(&mut conn).unwrap();
+    assert!(ai_tasks::list_tasks(&conn, "2026-09-29").unwrap().iter().all(|task| task.slot_id == Some(202)));
+}
+
+#[test]
+fn failed_v20_upgrade_rolls_back_without_partial_attachment_locations() {
+    let state = state();
+    let mut conn = state.db.lock().unwrap();
+    legacy_v20(&mut conn);
+    conn.execute_batch("CREATE TRIGGER fail_locations BEFORE UPDATE ON ai_tasks BEGIN SELECT RAISE(ABORT,'test migration failure'); END;").unwrap();
+    assert!(run_migrations(&mut conn).is_err());
+    assert!(conn.prepare("SELECT slot_id FROM ai_tasks").is_err());
+    assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i32>(0)).unwrap(), 20);
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM ai_tasks", [], |row| row.get::<_, i64>(0)).unwrap(), 5);
 }

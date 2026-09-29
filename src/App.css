@@ -124,8 +124,6 @@ body.pomodoro-floating-mode .app-shell { padding-top: 0; }
 .daily-plan-main:hover .daily-ai-add, .daily-plan-main:focus-within .daily-ai-add { opacity: 1; }
 .daily-ai-add:hover { color: #218671; background: #edf7f3; }
 .daily-ai-add:disabled { cursor: default; color: #b1bab6; }
-.daily-ai-count { position: absolute; right: 35px; padding: 0 4px; border: 0; background: #f1f7f4; color: #5c8c7b; font-size: 11px; border-radius: 3px; cursor: pointer; }
-.daily-plan-main:has(.daily-ai-count) > .daily-plan-cell { padding-right: 80px; }
 .daily-schedule-row-wrap.has-ai-tasks, .daily-schedule-row.has-ai-tasks { height: auto; max-height: none; }
 .daily-schedule-row.has-ai-tasks { grid-auto-rows: auto; }
 .daily-schedule-row.has-ai-tasks > .daily-time-cell { height: 100%; min-height: 40px; align-items: flex-start; padding-top: 10px; }

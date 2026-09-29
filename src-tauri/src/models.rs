@@ -260,6 +260,7 @@ impl AiTaskStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiTask {
     pub id: i64,
+    pub slot_id: Option<i64>,
     pub action_id: i64,
     pub linked_action_id: i64,
     pub event_title: String,
@@ -285,6 +286,7 @@ pub struct AiTaskFields {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewAiTask {
+    pub slot_id: i64,
     pub action_id: i64,
     pub linked_action_id: i64,
     pub list_date: String,

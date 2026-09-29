@@ -22,12 +22,12 @@ async function fixture(page) {
       { id: 5, event_id: 3, event_title: "推迟事项", title: "推迟的行动", status: 0, estimated_hours: 0 },
       { id: 6, title: "无事件的行动", status: 0, estimated_hours: 0 },
     ];
-    const slots = [
+    const slots = (JSON.parse(sessionStorage.getItem("ai-fixture-slots") || "null") || [
       { id: 1, list_date: "2026-09-29", start_time: "09:00", end_time: "10:00", action_id: 1, action: actions[0], actual_notes: "需求复盘", met_expectation: 1, focused: 1 },
       { id: 2, list_date: "2026-09-29", start_time: "10:00", end_time: "10:30", action_id: 1, action: actions[0] },
       { id: 3, list_date: "2026-09-29", start_time: "10:30", end_time: "11:30", action_id: 2, action: actions[1] },
       { id: 4, list_date: "2026-09-29", start_time: "11:30", end_time: "12:00" },
-    ];
+    ]).map(slot => ({ ...slot, action: actions.find(action => action.id === slot.action_id) }));
     window.aiFixture = {
       actions, slots, tasks: JSON.parse(sessionStorage.getItem("ai-fixture-tasks") || "[]"),
       failSave: false, failLoad: false, failPool: false, failDelete: false, holdSave: false, calls: [],
@@ -35,6 +35,7 @@ async function fixture(page) {
     const save = () => {
       sessionStorage.setItem("ai-fixture-tasks", JSON.stringify(window.aiFixture.tasks));
       sessionStorage.setItem("ai-fixture-actions", JSON.stringify(actions));
+      sessionStorage.setItem("ai-fixture-slots", JSON.stringify(slots));
     };
     const withSource = task => {
       const source = actions.find(action => action.id === task.linked_action_id);
@@ -109,7 +110,15 @@ async function fixture(page) {
         if (cmd === "move_daily_slot_action") {
           const source = slots.find(slot => slot.id === args.sourceSlotId);
           const target = slots.find(slot => slot.id === args.targetSlotId);
+          for (const task of data.tasks) {
+            if (task.slot_id === source.id && task.action_id === source.action_id) {
+              task.slot_id = target.id; task.updated_at += 1;
+            } else if (task.slot_id === target.id && task.action_id === target.action_id) {
+              task.slot_id = source.id; task.updated_at += 1;
+            }
+          }
           for (const key of ["action_id", "action", "actual_notes", "met_expectation", "focused"]) [source[key], target[key]] = [target[key], source[key]];
+          save();
           return structuredClone([source, target]);
         }
         if (cmd === "get_daily_used_dates") return [];
@@ -198,16 +207,17 @@ test("AI tasks keep idle rows compact, persist, follow actions and do not comple
     await drawer(page).getByRole("combobox", { name: "计划结束时间", exact: true }).click();
     await page.getByRole("option", { name: "11:30", exact: true }).click();
     await saveTask(page);
-    assert.equal(await page.locator(".daily-ai-tasks").count(), 1);
+    assert.equal(await page.locator(".daily-ai-tasks").count(), 2);
     assert.equal(await page.locator(".daily-ai-task").count(), 2);
     assert.match(await page.locator(".daily-ai-statistics").textContent(), /2 小时 30 分钟/);
     await page.getByLabel("已安排总时长 2 小时 30 分钟", { exact: true }).waitFor();
     await shot(page, "ai-nested-desktop.png");
     await page.locator(".daily-plan-cell").nth(0).dragTo(page.locator(".daily-plan-cell").nth(2));
     await page.waitForFunction(() => document.querySelectorAll(".daily-plan-cell")[0]?.textContent.includes("整理学习笔记"));
-    assert.equal(await page.locator(".daily-ai-tasks").count(), 1);
+    await page.locator(".daily-schedule-row").nth(2).locator(".daily-ai-task").waitFor();
+    assert.equal(await page.locator(".daily-ai-tasks").count(), 2);
     assert.equal(await page.locator(".daily-ai-task").count(), 2);
-    assert.equal(await page.locator(".daily-schedule-row").nth(1).locator(".daily-ai-task").count(), 2);
+    assert.equal(await page.locator(".daily-schedule-row").nth(1).locator(".daily-ai-task").count(), 1);
     assert.match(await page.locator(".daily-schedule-row").nth(2).textContent(), /需求复盘/);
     await page.locator(".daily-ai-task").first().click();
     await shot(page, "ai-detail-desktop.png");
@@ -438,5 +448,69 @@ test("AI entry reuses the action picker with all three sources and retry protect
     assert.equal(await page.evaluate(() => window.aiFixture.calls.filter(call => call.cmd === "assign_daily_slot_action").length), 1);
     assert.equal(await page.locator(".daily-ai-task").count(), 3);
   } catch (error) { await shot(page, "shared-ai-picker-failure.png"); throw error; }
+  finally { await browser.close(); }
+});
+
+test("afternoon AI tasks attach to the clicked occurrence across edits reloads and dragging", { timeout: 90000 }, async () => {
+  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
+  await fixture(page);
+  const rows = page.locator(".daily-schedule-row");
+  const expectTaskAt = async index => {
+    await rows.nth(index).locator(".daily-ai-task").getByText("整理竞品材料", { exact: true }).waitFor();
+    assert.equal(await page.locator(".daily-ai-task").count(), 1);
+    for (const other of [0, 1, 2, 3].filter(value => value !== index)) {
+      assert.equal(await rows.nth(other).locator(".daily-ai-task").count(), 0);
+    }
+    assert.equal(await page.locator(".daily-ai-count").count(), 0);
+  };
+  try {
+    await page.goto(`${baseUrl}/#/daily-list`);
+    await page.evaluate(() => {
+      const slots = window.aiFixture.slots;
+      Object.assign(slots[0], { start_time: "11:00", end_time: "12:00" });
+      Object.assign(slots[1], { start_time: "13:30", end_time: "14:30" });
+      Object.assign(slots[2], { start_time: "14:30", end_time: "15:30" });
+      Object.assign(slots[3], { start_time: "15:30", end_time: "16:30" });
+      sessionStorage.setItem("ai-fixture-slots", JSON.stringify(slots));
+    });
+    await page.reload();
+    await openAdd(page, 1);
+    await chooseAction(page, "整理竞品材料");
+    await expectTaskAt(1);
+    assert.equal(await page.evaluate(() => window.aiFixture.tasks[0].slot_id), 2);
+    assert.equal(await page.evaluate(() => window.aiFixture.tasks[0].start_time), "13:30");
+    assert.equal(await rows.nth(0).evaluate(el => el.getBoundingClientRect().height), 40);
+    await shot(page, "afternoon-ai-correct-row.png");
+    await page.reload();
+    await expectTaskAt(1);
+    await page.locator(".daily-ai-task").click();
+    await drawer(page).getByRole("combobox", { name: "计划开始时间", exact: true }).click();
+    await page.getByRole("option", { name: "11:00", exact: true }).click();
+    await saveTask(page);
+    await expectTaskAt(1);
+    await page.locator(".daily-ai-task").click();
+    for (const index of [0, 1]) {
+      const field = drawer(page).locator(".daily-ai-time-fields .ant-select").nth(index);
+      await field.hover();
+      await field.getByRole("button", { name: "Clear", exact: true }).click();
+    }
+    await saveTask(page);
+    await expectTaskAt(1);
+    await page.reload();
+    await expectTaskAt(1);
+    assert.equal(await page.locator(".daily-ai-task-time").count(), 0);
+    await page.locator(".daily-plan-cell").nth(1).dragTo(page.locator(".daily-plan-cell").nth(0));
+    await expectTaskAt(0);
+    await page.reload();
+    await expectTaskAt(0);
+    await page.locator(".daily-plan-cell").nth(0).dragTo(page.locator(".daily-plan-cell").nth(3));
+    await expectTaskAt(3);
+    await page.reload();
+    await expectTaskAt(3);
+    assert.equal(await page.evaluate(() => window.aiFixture.tasks[0].slot_id), 4);
+    assert.equal(await rows.nth(1).locator(".daily-plan-cell").textContent().then(text => text.includes("准备项目需求")), true);
+    await shot(page, "afternoon-ai-moved-row.png");
+  } catch (error) { await shot(page, "afternoon-ai-failure.png"); throw error; }
   finally { await browser.close(); }
 });

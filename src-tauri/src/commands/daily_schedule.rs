@@ -473,6 +473,15 @@ pub(super) fn move_slot_action_impl(
             return Err("时间段已发生变化，请刷新后重试".into());
         }
     }
+    // Keep attachments with the moved occurrence, not another row of the same action.
+    tx.execute(
+        "UPDATE ai_tasks
+         SET slot_id=CASE WHEN slot_id=?1 THEN ?2 ELSE ?1 END,
+             updated_at=MAX(updated_at+1,?3)
+         WHERE space_id=?4 AND list_date=?5 AND deleted_at IS NULL
+           AND ((slot_id=?1 AND action_id=?6) OR (slot_id=?2 AND action_id=?7))",
+        params![source_slot_id, target_slot_id, timestamp, space_id, list_date, source.action_id, target.action_id],
+    ).map_err(|error| error.to_string())?;
     let updated = slot_query(&tx, list_date).map_err(|error| error.to_string())?
         .into_iter().filter(|slot| slot.id == source_slot_id || slot.id == target_slot_id).collect();
     tx.commit().map_err(|error| error.to_string())?;

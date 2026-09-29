@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { aiTasksApi } from "@/lib/api";
 import { userFacingError } from "@/lib/errors";
-import type { AiTask } from "@/types";
+import type { AiTask, DailyScheduleSlot } from "@/types";
 
 export function useDailyAiTasks(date: string) {
   const [state, setState] = useState<{ date: string; tasks: AiTask[]; loading: boolean; error: string }>({
@@ -26,10 +26,20 @@ export function useDailyAiTasks(date: string) {
   const remove = (task: AiTask) => setState((current) => current.date !== task.list_date ? current : {
     ...current, tasks: current.tasks.filter((item) => item.id !== task.id),
   });
+  const moveWithSlots = (source: DailyScheduleSlot, target: DailyScheduleSlot) => {
+    setState(current => current.date !== source.list_date ? current : {
+      ...current, loading: true, tasks: current.tasks.map(task => {
+        if (task.slot_id === source.id && task.action_id === source.action?.id) return { ...task, slot_id: target.id };
+        if (task.slot_id === target.id && task.action_id === target.action?.id) return { ...task, slot_id: source.id };
+        return task;
+      }),
+    });
+    setVersion(current => current + 1);
+  };
   return {
     tasks: state.date === date ? state.tasks : [],
     loading: state.date !== date || state.loading,
     error: state.date === date ? state.error : "",
-    retry: () => setVersion((current) => current + 1), upsert, remove,
+    retry: () => setVersion((current) => current + 1), upsert, remove, moveWithSlots,
   };
 }

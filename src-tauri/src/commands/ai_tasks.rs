@@ -53,6 +53,7 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiTask> {
         status, start_time: row.get(5)?, end_time: row.get(6)?, notes: row.get(7)?,
         result: row.get(8)?, created_at: row.get(9)?, updated_at: row.get(10)?,
         linked_action_id: row.get(11)?, event_title: row.get(12)?, read_only: row.get(13)?,
+        slot_id: row.get(14)?,
     })
 }
 
@@ -63,7 +64,7 @@ const SELECT_TASK: &str =
                  WHEN t.status='completed' THEN 'queued' ELSE t.status END,
             t.start_time,t.end_time,COALESCE(linked.description,''),t.result,t.created_at,
             MAX(t.updated_at,linked.updated_at,COALESCE(e.updated_at,0)),linked.id,COALESCE(e.title,''),
-            (linked.status=2 OR COALESCE(e.status IN (4,5),0))
+            (linked.status=2 OR COALESCE(e.status IN (4,5),0)),t.slot_id
      FROM ai_tasks t JOIN actions a ON a.id=t.action_id AND a.space_id=t.space_id
      JOIN actions linked ON linked.id=t.linked_action_id AND linked.space_id=t.space_id
      LEFT JOIN events e ON e.id=linked.event_id AND e.space_id=t.space_id
@@ -118,10 +119,10 @@ pub(super) fn create_task_impl(state: &AppState, payload: NewAiTask) -> Result<A
     let space = current_space_id(&tx).map_err(|error| error.to_string())?;
     let scheduled: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM daily_schedule_slots s JOIN actions a ON a.id=s.action_id AND a.space_id=s.space_id
-         WHERE s.space_id=?1 AND s.list_date=?2 AND a.id=?3 AND a.deleted_at IS NULL)",
-        params![space, payload.list_date, payload.action_id], |row| row.get(0),
+         WHERE s.space_id=?1 AND s.list_date=?2 AND a.id=?3 AND a.deleted_at IS NULL AND s.id=?4)",
+        params![space, payload.list_date, payload.action_id, payload.slot_id], |row| row.get(0),
     ).map_err(|error| error.to_string())?;
-    if !scheduled { return Err("主行动未安排到当天，请刷新后重试".into()); }
+    if !scheduled { return Err("该时间段的主行动已变化，请刷新后重试".into()); }
     let linked: Option<(String, String, i64)> = tx.query_row(
         "SELECT a.title,COALESCE(a.description,''),MAX(a.updated_at,COALESCE(e.updated_at,0))
          FROM actions a LEFT JOIN events e ON e.id=a.event_id AND e.space_id=a.space_id
@@ -140,10 +141,10 @@ pub(super) fn create_task_impl(state: &AppState, payload: NewAiTask) -> Result<A
     let f = payload.fields;
     let now = now_millis().max(linked_version + 1);
     tx.execute(
-        "INSERT INTO ai_tasks (space_id,action_id,list_date,title,status,start_time,end_time,notes,result,created_at,updated_at,linked_action_id)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10,?11)",
+        "INSERT INTO ai_tasks (space_id,action_id,list_date,title,status,start_time,end_time,notes,result,created_at,updated_at,linked_action_id,slot_id)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10,?11,?12)",
         params![space, payload.action_id, payload.list_date, title, f.status.as_str(),
-                f.start_time, f.end_time, notes, f.result, now, payload.linked_action_id],
+                f.start_time, f.end_time, notes, f.result, now, payload.linked_action_id, payload.slot_id],
     ).map_err(|error| error.to_string())?;
     let id = tx.last_insert_rowid();
     sync_completion(&tx, &space, payload.linked_action_id, &f.status, now)?;
