@@ -5,6 +5,7 @@ export type AvailableUpdate = Update;
 
 /** 静默检查是否存在可安装的新版本。 */
 export async function checkForUpdate(): Promise<AvailableUpdate | null> {
+  if (import.meta.env.DEV) return null;
   return check();
 }
 

@@ -12,9 +12,13 @@ concurrency:
   group: lifeplan-release-${{ github.ref_name }}
   cancel-in-progress: false
 
+env:
+  LIFEPLAN_ENV: ouyangyu98
+
 jobs:
   prepare:
     name: 校验版本并生成更新日志
+    if: github.repository == 'ouyangyu98/LifePlan'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.context.outputs.tag }}
@@ -47,6 +51,9 @@ jobs:
             --summary-file "$GITHUB_STEP_SUMMARY" \
             --changelog-file release-CHANGELOG.md
 
+      - name: 检查独立发行配置及发布脚本
+        run: npm run test:release
+
       - name: 确认临时发布日志
         run: test -s release-CHANGELOG.md
 
@@ -68,17 +75,17 @@ jobs:
           - platform: Windows x64
             runner: windows-latest
             rust_target: x86_64-pc-windows-msvc
-            args: ""
+            args: "--bundles nsis"
             artifact_name: release-windows-x64
           - platform: macOS Apple Silicon
-            runner: macos-14
+            runner: macos-15
             rust_target: aarch64-apple-darwin
-            args: "--target aarch64-apple-darwin"
+            args: "--target aarch64-apple-darwin --bundles app,dmg"
             artifact_name: release-macos-arm64
           - platform: macOS Intel
-            runner: macos-14
+            runner: macos-15-intel
             rust_target: x86_64-apple-darwin
-            args: "--target x86_64-apple-darwin"
+            args: "--target x86_64-apple-darwin --bundles app,dmg"
             artifact_name: release-macos-x64
     steps:
       - name: 检出标签代码
@@ -99,6 +106,21 @@ jobs:
 
       - name: 安装依赖
         run: npm ci --no-audit --no-fund
+
+      - name: 校验签名配置
+        shell: bash
+        env:
+          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          test -n "$SIGNING_KEY" || { echo "缺少独立版更新签名密钥"; exit 1; }
+          test -n "$SIGNING_PASSWORD" || { echo "缺少独立版更新签名密码"; exit 1; }
+
+      - name: 检查数据目录隔离
+        shell: bash
+        run: |
+          rustc --edition=2021 --test src-tauri/src/db/channel.rs -o channel-tests
+          ./channel-tests
 
       - name: 构建 Tauri 产物
         env:
@@ -228,9 +250,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "LifePlan $TAG" --notes-file release-body.md --latest
+          set -euo pipefail
+          if existing_draft="$(gh release view "$TAG" --json isDraft --jq '.isDraft' 2>/dev/null)"; then
+            test "$existing_draft" = "true" || { echo "拒绝覆盖已公开发布的版本"; exit 1; }
+            gh release edit "$TAG" --title "LifePlan OY $TAG" --notes-file release-body.md
           else
-            gh release create "$TAG" --title "LifePlan $TAG" --notes-file release-body.md --latest
+            gh release create "$TAG" --title "LifePlan OY $TAG" --notes-file release-body.md --draft --verify-tag
           fi
           gh release upload "$TAG" release-upload/* --clobber
+          gh release edit "$TAG" --draft=false --latest

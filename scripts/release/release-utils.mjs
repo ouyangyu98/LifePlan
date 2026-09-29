@@ -133,7 +133,9 @@ export function findReleaseAssets(files) {
 export function renderReleaseBody({ tag, sections, repository, defaultBranch, assets }) {
   const assetUrl = (name) => `https://github.com/${repository}/releases/download/${tag}/${encodeURIComponent(name)}`;
   return [
-    `# LifePlan ${tag}`,
+    `# LifePlan OY ${tag}`,
+    "",
+    "ouyangyu98 独立维护版，非原作者官方发行版。",
     "",
     "## ✨ 本次更新",
     "",
@@ -148,6 +150,14 @@ export function renderReleaseBody({ tag, sections, repository, defaultBranch, as
     `| macOS | Intel 芯片 | [下载 x64 安装包](${assetUrl(assets.macosX64.name)}) |`,
     "",
     "> Windows 请下载 `.exe` 安装包；macOS 请根据芯片类型下载对应的安装包。",
+    "",
+    "## 安装与数据说明",
+    "",
+    "- 安装后的应用名称为 **LifePlan OY**，与原版及 LifePlan Dev 分开安装。",
+    "- 正式版使用独立数据目录 `LifePlanTodolist-ouyangyu98`；不会读取、覆盖或自动迁移原版及开发版数据。首次启动为空白数据。",
+    "- 更新仅来自 `ouyangyu98/LifePlan`，更新包使用本维护版的独立密钥校验。",
+    "- 当前未提供 Apple Developer ID 公证或 Windows 商业代码签名。macOS 使用临时本地签名，系统仍可能拦截；请核对来源和 SHA-256，不要关闭系统安全保护。",
+    "- `SHA256SUMS.txt` 提供各文件校验值。首次发行已通过构建和自动化检查，仍欢迎通过 Issues 反馈设备兼容问题。",
     "",
     "---",
     "",

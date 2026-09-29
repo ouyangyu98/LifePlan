@@ -19,6 +19,7 @@ const questions = [
   { title: "LifePlan 适合什么样的使用方式？", answer: "适合希望把多件事情持续推进的人：在事件篮中整理和拆解，在今日事中分配时间，再记录复盘。既可以管理工作，也可以为学习和生活留出位置。不需要一次启用所有功能。" },
   { title: "这里的 AI 任务会自动执行吗？", answer: "不会。LifePlan 负责安排和跟踪 AI 任务，你仍需要在自己的 AI 工具中执行，再回到这里更新状态、记录结果。AI 任务挂在主行动下面，不会替代主行动，也不会把并行时间重复算作你的个人时长。" },
   { title: "需要注册账号吗？数据存在哪里？", answer: "客户端无需注册即可使用，事件、日程和笔记保存在本机。它不是云端同步服务，不同电脑的数据不会自动同步。请妥善保留本地数据和备份。" },
+  { title: "会覆盖原版或个人开发版的数据吗？", answer: "不会。安装后的应用名为 LifePlan OY，安装身份、数据目录和更新源均与原版及 LifePlan Dev 分开。首次启动是空白数据，不会自动导入旧数据；切换使用前请先备份，不要直接覆盖数据库。" },
   { title: "不需要番茄钟、奖励或笔记，可以隐藏吗？", answer: "可以。在设置中按需开启或关闭工作日志、日程模板、奖励池、番茄钟、心得和数据统计。关闭功能不会让它继续占据你的日常界面。" },
   { title: "有 iPhone、Android 或 Linux 安装包吗？", answer: "当前下载区只列出已经准备的桌面平台。iPhone、Android 和 Linux 暂未提供安装包；这个网站是产品介绍与下载站，不是在线版客户端。" },
   { title: "这是原作者的官方发行版吗？", answer: "不是。这是 ouyangyu98 基于 9527GC/LifePlan 持续维护的独立版本。功能与原版有所不同，源代码、版本说明与问题反馈均在本页面链接的 GitHub 仓库中。" },
@@ -152,7 +153,7 @@ function Website() {
           </div>
           <p className="copy-status" role="status">{copyError || (copied ? "校验值已复制" : "")}</p>
           <div className="download-footer"><p><LockKeyhole size={16} />无需账号，本地保存。暂不提供手机端与云同步。</p><ExternalLink href={downloads.releaseUrl}>版本说明与历史下载<ArrowUpRight size={15} /></ExternalLink></div>
-          <details className="installation-note"><summary>安装前需要知道什么？<Plus size={16} /></summary><p>下载与你的系统和芯片匹配的安装包。Mac 可在“关于本机”中查看芯片类型。个人维护版尚未提供商业代码签名或 Apple 公证，系统可能显示安全提示；请先确认下载来源与文件校验值，不要关闭系统安全保护。首次切换版本前，请保留已有数据和备份。</p></details>
+          <details className="installation-note"><summary>安装前需要知道什么？<Plus size={16} /></summary><p>安装后的应用名为 LifePlan OY，与原版和 LifePlan Dev 独立存储，首次打开不会自动带入旧数据。下载与你的系统和芯片匹配的安装包，Mac 可在“关于本机”中查看芯片类型。当前尚未提供商业代码签名或 Apple 公证，Mac 安装包使用临时本地签名，系统仍可能拦截；请先确认下载来源与文件校验值，不要关闭系统安全保护。切换版本前，请保留已有数据和备份。</p></details>
         </div>
       </section>
 

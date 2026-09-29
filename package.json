@@ -1,7 +1,7 @@
 {
   "name": "life-plan-todolist",
   "private": true,
-  "version": "1.0.15",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,7 @@
     "website:check": "tsc -p website/tsconfig.json",
     "website:build": "vite build --config website/vite.config.ts",
     "tauri": "tauri",
-    "test:release": "node --test tests/release/release-utils.test.mjs"
+    "test:release": "node --test tests/release/*.test.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

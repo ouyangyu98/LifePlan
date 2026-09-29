@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -161,6 +162,12 @@ test("汇总脚本生成 latest.json 并去重同名同内容签名", () => {
     assert.equal(latest.platforms["darwin-x86_64"].signature, "mac-x64-signature");
     assert.match(readFileSync(bodyFile, "utf8"), /下载 Windows 安装包/);
     assert.equal(readFileSync(join(outputDirectory, "LifePlan_1.0.5_x64-setup.exe.sig"), "utf8"), "windows-signature");
+    const checksums = readFileSync(join(outputDirectory, "SHA256SUMS.txt"), "utf8").trim().split("\n");
+    assert.equal(checksums.length, 9);
+    for (const line of checksums) {
+      const [hash, name] = line.split("  ");
+      assert.equal(hash, createHash("sha256").update(readFileSync(join(outputDirectory, name))).digest("hex"));
+    }
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

@@ -156,6 +156,11 @@ async function main() {
     ...assets.signatures,
   ];
   const uploadedCount = await copyAssets(outputFiles, outputDirectory);
+  const checksums = [];
+  for (const name of [...new Set(outputFiles.map(file => file.name))].sort()) {
+    checksums.push(`${await getFileHash(resolve(outputDirectory, name))}  ${name}`);
+  }
+  await writeFile(resolve(outputDirectory, "SHA256SUMS.txt"), `${checksums.join("\n")}\n`, "utf8");
   const releaseBody = renderReleaseBody({ ...context, assets }).replace(/\r\n/g, "\n");
   await mkdir(dirname(bodyFile), { recursive: true });
   await writeFile(bodyFile, releaseBody, "utf8");

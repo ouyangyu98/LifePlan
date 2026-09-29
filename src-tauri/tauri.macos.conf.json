@@ -3,7 +3,7 @@
   "app": {
     "windows": [
       {
-        "title": "LifePlan",
+        "title": "LifePlan OY",
         "width": 1050,
         "height": 650,
         "minWidth": 1050,
@@ -19,5 +19,10 @@
         "dragDropEnabled": false
       }
     ]
+  },
+  "bundle": {
+    "macOS": {
+      "signingIdentity": "-"
+    }
   }
 }

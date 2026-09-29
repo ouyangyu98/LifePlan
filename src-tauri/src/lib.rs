@@ -30,7 +30,7 @@ fn show_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
 }
 
 /// 发布页地址：当数据库版本比当前程序更新（程序版本过低）时引导用户去更新。
-const RELEASE_PAGE_URL: &str = "https://github.com/9527GC/LifePlan/releases";
+const RELEASE_PAGE_URL: &str = "https://github.com/ouyangyu98/LifePlan/releases";
 
 /// 使用系统默认浏览器打开 URL。
 /// 此处数据库初始化已失败、尚未构建 AppHandle，无法使用 tauri-plugin-opener，

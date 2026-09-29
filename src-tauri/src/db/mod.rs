@@ -8,6 +8,7 @@ pub mod backup;
 pub mod migrations;
 mod ai_task_actions;
 mod ai_task_slots;
+mod channel;
 mod retire_delegation;
 
 #[derive(Error, Debug)]
@@ -88,9 +89,8 @@ pub fn init_db() -> Result<AppState, DbError> {
 }
 
 /// 解析当前渠道的应用数据根目录。
-/// 生产构建保持既有目录名 `LifePlanTodolist`（不影响老用户）；
-/// 通过 `LIFEPLAN_ENV`（运行时优先，其次编译期 `LIFEPLAN_BUILD_ENV`）区分内测/预发渠道，
-/// 本地 debug 构建自动落到 `-dev` 目录，避免非生产构建迁移正式数据库导致旧版本打不开。
+/// 独立发行版始终使用 ouyangyu98 命名空间，不读取或迁移原版数据。
+/// 仅开发构建允许运行时切换渠道，保留现有 ouyangyu98-dev 数据目录。
 pub fn app_data_dir() -> Result<PathBuf, DbError> {
     let base = dirs::data_dir()
         .ok_or_else(|| DbError::PathFailed("unable to resolve system data directory".into()))?;
@@ -98,29 +98,13 @@ pub fn app_data_dir() -> Result<PathBuf, DbError> {
 }
 
 fn channel_data_folder() -> String {
-    match channel_suffix().as_deref() {
-        Some(suffix) => format!("LifePlanTodolist-{suffix}"),
-        None => "LifePlanTodolist".to_string(),
-    }
-}
-
-fn channel_suffix() -> Option<String> {
-    let raw = std::env::var("LIFEPLAN_ENV")
-        .ok()
-        .or_else(|| option_env!("LIFEPLAN_BUILD_ENV").map(|value| value.to_string()))
-        .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty() && value != "production" && value != "prod");
-    if raw.is_some() {
-        return raw;
-    }
     #[cfg(debug_assertions)]
-    {
-        return Some("dev".to_string());
-    }
+    let environment = std::env::var("LIFEPLAN_ENV")
+        .ok()
+        .or_else(|| option_env!("LIFEPLAN_BUILD_ENV").map(str::to_owned));
     #[cfg(not(debug_assertions))]
-    {
-        None
-    }
+    let environment = option_env!("LIFEPLAN_BUILD_ENV").map(str::to_owned);
+    channel::data_folder(environment.as_deref(), cfg!(debug_assertions))
 }
 
 pub fn db_path() -> Result<PathBuf, DbError> {

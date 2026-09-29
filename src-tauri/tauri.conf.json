@@ -1,8 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "LifePlan",
-  "version": "1.0.15",
-  "identifier": "com.tauri-app.life-plan-todolist",
+  "productName": "LifePlan OY",
+  "mainBinaryName": "lifeplan-oy",
+  "version": "1.1.0",
+  "identifier": "com.ouyangyu98.lifeplan",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +13,7 @@
   "app": {
     "windows": [
       {
-        "title": "LifePlan",
+        "title": "LifePlan OY",
         "width": 1050,
         "height": 650,
         "minWidth": 1050,
@@ -44,9 +45,9 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQwODc1MUQ1NUVDMTUzQTUKUldTbFU4RmUxVkdIUU9pQWdCVkpVdXppZzVJV0kwU1lvYWl6K1I2azZCcS9oYWMxUURUcWo5N3cK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc0RTNDMzg2Rjk0NENFQ0UKUldUT3prVDVoc1BqZEUxN3pFd2FrVzltaDE5QzJQUFNxMnRrS1pWdEZLV0VYT3VxaG00ZG55ZlQK",
       "endpoints": [
-        "https://github.com/9527GC/LifePlan/releases/latest/download/latest.json"
+        "https://github.com/ouyangyu98/LifePlan/releases/latest/download/latest.json"
       ]
     }
   }
