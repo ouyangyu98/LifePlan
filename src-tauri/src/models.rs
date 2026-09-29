@@ -17,6 +17,7 @@ pub struct Event {
     pub history_note: Option<String>,
     pub delay_until: Option<String>,
     pub delay_note: Option<String>,
+    pub delay_resume_status: i32,
     pub abandon_reason: Option<String>,
     pub target: Option<String>,
     pub deadline: Option<String>,

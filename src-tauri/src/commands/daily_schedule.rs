@@ -284,16 +284,26 @@ pub fn update_daily_slot(
     state: State<'_, AppState>,
     payload: UpdateDailySlot,
 ) -> Result<DailyScheduleSlot, String> {
+    update_slot_impl(&state, payload)
+}
+
+pub(super) fn update_slot_impl(
+    state: &AppState,
+    payload: UpdateDailySlot,
+) -> Result<DailyScheduleSlot, String> {
     validate_range(&payload.start_time, &payload.end_time)?;
     let conn = state.db.lock().map_err(|error| error.to_string())?;
     let space_id = current_space_id(&conn).map_err(|error| error.to_string())?;
-    let list_date: String = conn
+    let (list_date, action_id): (String, Option<i64>) = conn
         .query_row(
-            "SELECT list_date FROM daily_schedule_slots WHERE id = ?1 AND space_id = ?2",
+            "SELECT list_date, action_id FROM daily_schedule_slots WHERE id = ?1 AND space_id = ?2",
             params![payload.id, space_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|error| error.to_string())?;
+    if let Some(action_id) = action_id {
+        super::actions::validate_schedulable_event(&conn, &space_id, action_id)?;
+    }
     if let Some((start, end)) = overlap_exists(
         &conn,
         &space_id,
@@ -401,6 +411,14 @@ pub fn assign_daily_slot_action(
     slot_id: i64,
     action_id: Option<i64>,
 ) -> Result<DailyScheduleSlot, String> {
+    assign_slot_action_impl(&state, slot_id, action_id)
+}
+
+pub(super) fn assign_slot_action_impl(
+    state: &AppState,
+    slot_id: i64,
+    action_id: Option<i64>,
+) -> Result<DailyScheduleSlot, String> {
     let conn = state.db.lock().map_err(|error| error.to_string())?;
     let space_id = current_space_id(&conn).map_err(|error| error.to_string())?;
     let list_date: String = conn
@@ -411,10 +429,7 @@ pub fn assign_daily_slot_action(
         )
         .map_err(|error| error.to_string())?;
     if let Some(action_id) = action_id {
-        let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM actions WHERE id = ?1 AND space_id = ?2 AND deleted_at IS NULL)", params![action_id, space_id], |row| row.get(0)).map_err(|error| error.to_string())?;
-        if !exists {
-            return Err("行动不存在".into());
-        }
+        super::actions::validate_schedulable_event(&conn, &space_id, action_id)?;
     }
     let changed = conn.execute("UPDATE daily_schedule_slots SET action_id = ?1, updated_at = ?2 WHERE id = ?3 AND space_id = ?4", params![action_id, now_millis(), slot_id, space_id]).map_err(|error| error.to_string())?;
     if changed == 0 {
@@ -458,6 +473,9 @@ pub(super) fn move_slot_action_impl(
     }
     if target.action_id.is_some() && target.action.is_none() {
         return Err("目标行动已发生变化，请刷新后重试".into());
+    }
+    for action_id in [source.action_id, target.action_id].into_iter().flatten() {
+        super::actions::validate_schedulable_event(&tx, &space_id, action_id)?;
     }
     let timestamp = now_millis();
     // Move the review with its action; commit both slots together or neither.

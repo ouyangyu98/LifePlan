@@ -1,7 +1,7 @@
 use crate::db::{current_space_id, now_millis};
 use crate::models::{Action, AddDailyListItem, DailyListItem, ReorderDailyList};
 use crate::AppState;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use std::collections::HashSet;
 use tauri::State;
 
@@ -87,17 +87,7 @@ pub fn add_daily_list_item(
     }
     let conn = state.db.lock().map_err(|error| error.to_string())?;
     let space_id = current_space_id(&conn).map_err(|error| error.to_string())?;
-    let exists: Option<i64> = conn
-        .query_row(
-            "SELECT id FROM actions WHERE id = ?1 AND space_id = ?2 AND deleted_at IS NULL",
-            params![payload.action_id, space_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|error| error.to_string())?;
-    if exists.is_none() {
-        return Err("行动不存在".into());
-    }
+    super::actions::validate_schedulable_event(&conn, &space_id, payload.action_id)?;
     let next_order: i64 = conn.query_row("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM daily_list_items WHERE space_id = ?1 AND list_date = ?2", params![space_id, payload.list_date], |row| row.get(0)).map_err(|error| error.to_string())?;
     conn.execute("INSERT OR IGNORE INTO daily_list_items (space_id, action_id, list_date, sort_order, created_at) VALUES (?1, ?2, ?3, ?4, ?5)", params![space_id, payload.action_id, payload.list_date, next_order, now_millis()]).map_err(|error| error.to_string())?;
     list_items(&conn, &payload.list_date).map_err(|error| error.to_string())

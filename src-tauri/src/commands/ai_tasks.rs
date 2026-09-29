@@ -117,6 +117,7 @@ pub(super) fn create_task_impl(state: &AppState, payload: NewAiTask) -> Result<A
     let mut conn = state.db.lock().map_err(|error| error.to_string())?;
     let tx = conn.transaction().map_err(|error| error.to_string())?;
     let space = current_space_id(&tx).map_err(|error| error.to_string())?;
+    super::actions::validate_schedulable_event(&tx, &space, payload.action_id)?;
     let scheduled: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM daily_schedule_slots s JOIN actions a ON a.id=s.action_id AND a.space_id=s.space_id
          WHERE s.space_id=?1 AND s.list_date=?2 AND a.id=?3 AND a.deleted_at IS NULL AND s.id=?4)",

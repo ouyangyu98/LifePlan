@@ -1,6 +1,7 @@
 use crate::db::{current_space_id, new_uuid, now_millis};
 use crate::models::{Event, EventCompletionCheck, NewEvent, ProcessEvent, UpdateEvent};
 use crate::AppState;
+use chrono::{Local, NaiveDate, NaiveDateTime};
 use rusqlite::{params, Connection, OptionalExtension};
 use tauri::State;
 
@@ -26,17 +27,23 @@ fn row_to_event(row: &rusqlite::Row) -> rusqlite::Result<Event> {
         created_at: row.get(17)?,
         updated_at: row.get(18)?,
         history_note: row.get(19)?,
+        delay_resume_status: row.get(20)?,
     })
 }
 
-fn restore_due_delays(conn: &Connection) -> rusqlite::Result<()> {
+pub(super) fn restore_due_delays(conn: &Connection) -> rusqlite::Result<()> {
+    restore_due_delays_on(conn, &Local::now().format("%Y-%m-%d").to_string())
+}
+
+pub(super) fn restore_due_delays_on(conn: &Connection, today: &str) -> rusqlite::Result<()> {
     let space_id = current_space_id(conn).map_err(to_sql_error)?;
     conn.execute(
         "UPDATE events
-         SET status = 0, delay_until = NULL, updated_at = ?1
+         SET status = delay_resume_status, delay_resume_status = 0,
+             delay_until = NULL, delay_note = NULL, updated_at = ?1
          WHERE space_id = ?2 AND deleted_at IS NULL AND status = 3
-           AND delay_until IS NOT NULL AND date(delay_until) <= date('now')",
-        params![now_millis(), space_id],
+           AND delay_until IS NOT NULL AND date(delay_until) <= date(?3)",
+        params![now_millis(), space_id, today],
     )?;
     Ok(())
 }
@@ -130,7 +137,8 @@ pub fn list_events(conn: &Connection) -> rusqlite::Result<Vec<Event>> {
                 e.importance, e.urgency, COUNT(a.id),
                 COALESCE(SUM(CASE WHEN a.status = 0 THEN 1 ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN a.status = 1 THEN 1 ELSE 0 END), 0),
-                e.is_quick_completed, e.created_at, e.updated_at, e.history_note
+                e.is_quick_completed, e.created_at, e.updated_at, e.history_note,
+                e.delay_resume_status
          FROM events e
          LEFT JOIN event_categories c ON c.id = e.category_id AND c.space_id = e.space_id
          LEFT JOIN actions a ON a.space_id = e.space_id AND a.deleted_at IS NULL
@@ -234,28 +242,41 @@ pub fn process_event(state: State<'_, AppState>, payload: ProcessEvent) -> Resul
 }
 
 pub(super) fn process_event_impl(state: &AppState, payload: ProcessEvent) -> Result<(), String> {
+    process_event_at(state, payload, Local::now().naive_local())
+}
+
+pub(super) fn process_event_at(
+    state: &AppState,
+    payload: ProcessEvent,
+    local_now: NaiveDateTime,
+) -> Result<(), String> {
     let mut conn = state.db.lock().map_err(|error| error.to_string())?;
     let tx = conn.transaction().map_err(|error| error.to_string())?;
     let space_id = current_space_id(&tx).map_err(|error| error.to_string())?;
-    let status: Option<i32> = tx
+    let status: Option<(i32, i32)> = tx
         .query_row(
-            "SELECT status FROM events
+            "SELECT status, delay_resume_status FROM events
              WHERE id = ?1 AND space_id = ?2 AND deleted_at IS NULL",
             params![payload.event_id, space_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(|error| error.to_string())?;
-    let Some(status) = status else {
+    let Some((status, resume_status)) = status else {
         return Err("事件不存在".into());
     };
-    if status != 0 && status != 3 && !(status == 1 && payload.decision == "abandon") {
+    if status != 0 && status != 3
+        && !(status == 1 && matches!(payload.decision.as_str(), "abandon" | "delay"))
+    {
         return Err("当前事件不能重复处理".into());
     }
 
     let timestamp = now_millis();
     match payload.decision.as_str() {
         "self" => {
+            if status == 3 && resume_status == 1 {
+                return Err("该事件已有行动，请恢复进行，无需重新拆解".into());
+            }
             let quick_complete = payload.quick_complete.unwrap_or(false);
             let action_steps = payload.action_steps.as_deref().unwrap_or(&[]);
             if !quick_complete && action_steps.is_empty() {
@@ -283,25 +304,36 @@ pub(super) fn process_event_impl(state: &AppState, payload: ProcessEvent) -> Res
                 tx.execute("INSERT INTO actions (space_id, sync_id, event_id, title, estimated_hours, start_date, deadline, importance, urgency, priority, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 0, 4, ?8, ?8)", params![space_id, new_uuid(), payload.event_id, step.title.trim(), step.estimated_hours, step.start_date.as_deref(), payload.deadline.as_deref(), timestamp]).map_err(|error| error.to_string())?;
             }
             let event_status = if quick_complete { 5 } else { 1 };
-            tx.execute("UPDATE events SET title = ?1, target = ?2, deadline = ?3, status = ?4, is_quick_completed = ?5, updated_at = ?6 WHERE id = ?7 AND space_id = ?8 AND deleted_at IS NULL", params![payload.title.as_deref().unwrap_or(""), payload.target.as_deref(), payload.deadline.as_deref(), event_status, i32::from(quick_complete), timestamp, payload.event_id, space_id]).map_err(|error| error.to_string())?;
+            tx.execute("UPDATE events SET title = ?1, target = ?2, deadline = ?3, status = ?4, is_quick_completed = ?5, updated_at = ?6, delay_until = NULL, delay_note = NULL, delay_resume_status = 0 WHERE id = ?7 AND space_id = ?8 AND deleted_at IS NULL", params![payload.title.as_deref().unwrap_or(""), payload.target.as_deref(), payload.deadline.as_deref(), event_status, i32::from(quick_complete), timestamp, payload.event_id, space_id]).map_err(|error| error.to_string())?;
             if quick_complete {
                 award_event_completion_tx(&tx, payload.event_id, &space_id, 0)?;
             }
         }
         "delay" => {
+            let delay_until = payload.delay_until.as_deref().map(str::trim).filter(|v| !v.is_empty());
+            if let Some(date) = delay_until {
+                let parsed = NaiveDate::parse_from_str(date, "%Y-%m-%d")
+                    .map_err(|_| "恢复日期格式无效")?;
+                if parsed.format("%Y-%m-%d").to_string() != date || parsed <= local_now.date() {
+                    return Err("恢复日期须晚于今天，也可以留空手动恢复".into());
+                }
+            }
             tx.execute(
                 "UPDATE events SET status = 3, delay_until = ?1, delay_note = ?2,
-                 updated_at = ?3
+                 updated_at = ?3,
+                 delay_resume_status = CASE WHEN status = 3 THEN delay_resume_status ELSE status END
                  WHERE id = ?4 AND space_id = ?5 AND deleted_at IS NULL",
                 params![
-                    payload.delay_until.as_deref(),
-                    payload.delay_note.as_deref(),
+                    delay_until,
+                    payload.delay_note.as_deref().map(str::trim).filter(|v| !v.is_empty()),
                     timestamp,
                     payload.event_id,
                     space_id
                 ],
             )
             .map_err(|error| error.to_string())?;
+            release_event_arrangements(&tx, &space_id, payload.event_id, timestamp, local_now)
+                .map_err(|error| error.to_string())?;
         }
         "abandon" => abandon_event_tx(
             &tx,
@@ -312,6 +344,40 @@ pub(super) fn process_event_impl(state: &AppState, payload: ProcessEvent) -> Res
         _ => return Err("不支持的事件处理方式".into()),
     }
     tx.commit().map_err(|error| error.to_string())
+}
+
+fn release_event_arrangements(
+    tx: &rusqlite::Transaction<'_>,
+    space: &str,
+    event_id: i64,
+    timestamp: i64,
+    local_now: NaiveDateTime,
+) -> rusqlite::Result<()> {
+    let today = local_now.format("%Y-%m-%d").to_string();
+    let time = local_now.format("%H:%M").to_string();
+    // A review is evidence of work already done, even if its date was entered in advance.
+    let future = "s.space_id=?1
+        AND (s.list_date>?3 OR (s.list_date=?3 AND s.start_time>?4))
+        AND TRIM(COALESCE(s.actual_notes,''))=''
+        AND s.met_expectation IS NULL AND s.focused IS NULL";
+    let event_actions = "SELECT id FROM actions WHERE space_id=?1 AND event_id=?2 AND deleted_at IS NULL";
+    // Use the existing unlink convention: keep source actions and result records,
+    // but prevent detached attachments from reappearing when a slot is reused.
+    tx.execute(
+        &format!("UPDATE ai_tasks SET deleted_at=?5, updated_at=MAX(updated_at+1,?5)
+          WHERE space_id=?1 AND deleted_at IS NULL
+            AND EXISTS(SELECT 1 FROM daily_schedule_slots s
+              WHERE s.id=ai_tasks.slot_id AND s.action_id=ai_tasks.action_id
+                AND s.list_date=ai_tasks.list_date AND {future}
+                AND (s.action_id IN ({event_actions}) OR ai_tasks.linked_action_id IN ({event_actions})))"),
+        params![space, event_id, today, time, timestamp],
+    )?;
+    tx.execute(
+        &format!("UPDATE daily_schedule_slots AS s SET action_id=NULL, updated_at=?5
+          WHERE {future} AND s.action_id IN ({event_actions})"),
+        params![space, event_id, today, time, timestamp],
+    )?;
+    Ok(())
 }
 
 fn validate_dates(start: &Option<String>, deadline: &Option<String>) -> Result<(), String> {
@@ -333,7 +399,8 @@ pub(crate) fn abandon_event_tx(
     }
     let space_id = current_space_id(tx).map_err(|error| error.to_string())?;
     tx.execute(
-        "UPDATE events SET status = 4, abandon_reason = ?1, updated_at = ?2
+        "UPDATE events SET status = 4, abandon_reason = ?1, updated_at = ?2,
+         delay_until = NULL, delay_note = NULL, delay_resume_status = 0
          WHERE id = ?3 AND space_id = ?4 AND deleted_at IS NULL",
         params![reason.trim(), timestamp, event_id, space_id],
     )
@@ -398,6 +465,10 @@ pub fn complete_event(
 
 #[tauri::command]
 pub fn restore_event(state: State<'_, AppState>, event_id: i64) -> Result<(), String> {
+    restore_event_impl(&state, event_id)
+}
+
+pub(super) fn restore_event_impl(state: &AppState, event_id: i64) -> Result<(), String> {
     let mut conn = state.db.lock().map_err(|error| error.to_string())?;
     let tx = conn.transaction().map_err(|error| error.to_string())?;
     let timestamp = now_millis();
@@ -412,24 +483,27 @@ pub fn restore_event(state: State<'_, AppState>, event_id: i64) -> Result<(), St
         .optional()
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "事件不存在".to_string())?;
-    if status != 4 {
-        return Err("只有已放弃事件可以恢复".into());
+    if status != 3 && status != 4 {
+        return Err("只有推迟或已放弃事件可以恢复".into());
     }
     tx.execute(
-        "UPDATE events SET status = 1,
+        "UPDATE events SET status = CASE WHEN status = 3 THEN delay_resume_status ELSE 1 END,
+         delay_resume_status = 0,
          delay_until = NULL, delay_note = NULL, abandon_reason = NULL,
          updated_at = ?1
          WHERE id = ?2 AND space_id = ?3 AND deleted_at IS NULL",
         params![timestamp, event_id, space_id],
     )
     .map_err(|error| error.to_string())?;
-    tx.execute(
-        "UPDATE actions SET status = 0, cascade_abandoned = 0, updated_at = ?1
-         WHERE status = 2 AND cascade_abandoned = 1 AND space_id = ?3
-           AND deleted_at IS NULL AND event_id = ?2",
-        params![timestamp, event_id, space_id],
-    )
-    .map_err(|error| error.to_string())?;
+    if status == 4 {
+        tx.execute(
+            "UPDATE actions SET status = 0, cascade_abandoned = 0, updated_at = ?1
+             WHERE status = 2 AND cascade_abandoned = 1 AND space_id = ?3
+               AND deleted_at IS NULL AND event_id = ?2",
+            params![timestamp, event_id, space_id],
+        )
+        .map_err(|error| error.to_string())?;
+    }
     tx.commit().map_err(|error| error.to_string())
 }
 

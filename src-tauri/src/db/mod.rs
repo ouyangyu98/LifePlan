@@ -150,6 +150,7 @@ pub fn run_migrations(conn: &mut Connection) -> Result<bool, DbError> {
             .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
         ai_task_actions::migrate(conn)?;
         ai_task_slots::migrate(conn)?;
+        migrate_event_delay_resume(conn)?;
         return Ok(true);
     }
     if version == 15 {
@@ -184,7 +185,11 @@ pub fn run_migrations(conn: &mut Connection) -> Result<bool, DbError> {
         ai_task_slots::migrate(conn)?;
     }
     if (18..=21).contains(&upgraded_version) {
+        migrate_event_delay_resume(conn)?;
+    }
+    if (18..=22).contains(&upgraded_version) {
         validate_current_schema(conn)?;
+        conn.prepare("SELECT delay_resume_status FROM events LIMIT 0")?;
         conn.prepare("SELECT id,space_id,action_id,linked_action_id,slot_id,list_date,title,status,start_time,end_time,notes,result,deleted_at,created_at,updated_at FROM ai_tasks LIMIT 0")
             .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
         return Ok(false);
@@ -192,6 +197,20 @@ pub fn run_migrations(conn: &mut Connection) -> Result<bool, DbError> {
     Err(DbError::MigrationFailed(format!(
         "不支持从数据库版本 v{version} 升级；项目概念及其历史数据兼容已移除，请使用 v15 数据库或重新初始化。"
     )))
+}
+
+fn migrate_event_delay_resume(conn: &mut Connection) -> Result<(), DbError> {
+    let tx = conn.transaction()?;
+    if !column_exists(&tx, "events", "delay_resume_status")? {
+        // Existing delayed events could only originate from pending.
+        tx.execute_batch(
+            "ALTER TABLE events ADD COLUMN delay_resume_status INTEGER NOT NULL DEFAULT 0
+             CHECK(delay_resume_status IN (0,1));",
+        )?;
+    }
+    tx.pragma_update(None, "user_version", 22)?;
+    tx.commit()?;
+    Ok(())
 }
 
 fn migrate_add_personal_features(conn: &mut Connection) -> Result<(), DbError> {

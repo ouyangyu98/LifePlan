@@ -344,15 +344,16 @@ test("daily calendar marks dates used by Today Tasks", { timeout: 60000 }, async
     await page.locator(".daily-date-panel .ant-picker").click();
     const panel = page.locator(".ant-picker-dropdown:visible");
     await panel.waitFor();
-    await panel.locator(".daily-date-used-dot").nth(1).waitFor();
-    assert.equal(await panel.locator(".daily-date-used-dot").count(), 2);
-    assert.equal(await panel.locator("[aria-label='这天使用过今日事']").count(), 2);
-    const positions = await panel.locator(".daily-date-cell").evaluateAll((cells) => cells.map((cell) => {
+    await panel.locator(".daily-date-used-dot[aria-label='这天使用过今日事']").nth(1).waitFor();
+    const markers = await panel.locator(".daily-date-cell").evaluateAll((cells) => cells.map((cell) => {
       const digit = cell.querySelector(".ant-picker-cell-inner").getBoundingClientRect();
-      const dot = cell.querySelector(".daily-date-used-dot").getBoundingClientRect();
-      return dot.x >= digit.right - 4 && dot.bottom <= digit.top + 5;
+      const marker = cell.querySelector(".daily-date-used-dot");
+      const dot = marker.getBoundingClientRect();
+      return { label: marker.getAttribute("aria-label"), positioned: dot.x >= digit.right - 4 && dot.bottom <= digit.top + 5 };
     }));
-    assert.ok(positions.every(Boolean), "Markers must sit above the date's upper-right corner");
+    assert.equal(markers.length, 2);
+    assert.ok(markers.every(marker => marker.label === "这天使用过今日事"));
+    assert.ok(markers.every(marker => marker.positioned), "Markers must sit above the date's upper-right corner");
     if (screenshots) {
       await mkdir(screenshots, { recursive: true });
       await panel.locator(".ant-picker-panel").screenshot({ path: path.join(screenshots, "daily-calendar-corner.png") });

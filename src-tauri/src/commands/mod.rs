@@ -19,3 +19,6 @@ mod personal_features_tests;
 
 #[cfg(test)]
 mod ai_tasks_tests;
+
+#[cfg(test)]
+mod event_delays_tests;

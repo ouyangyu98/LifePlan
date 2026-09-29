@@ -206,6 +206,20 @@ export default function Inbox() {
   };
   useEffect(() => {
     void load();
+    let timer: ReturnType<typeof setTimeout>;
+    const scheduleRefresh = () => {
+      timer = setTimeout(() => {
+        void load(false);
+        scheduleRefresh();
+      }, dayjs().add(1, "day").startOf("day").diff(dayjs()) + 100);
+    };
+    const refresh = () => { void load(false); };
+    scheduleRefresh();
+    window.addEventListener("focus", refresh);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("focus", refresh);
+    };
   }, []);
   useEffect(() => {
     try { localStorage.setItem(inboxViewStorageKey, JSON.stringify(views)); } catch { /* Storage may be unavailable. */ }
@@ -330,6 +344,7 @@ export default function Inbox() {
   const restore = async (item: Event) => {
     try {
       await eventsApi.restore(item.id);
+      setFilter(item.status === 3 && item.delay_resume_status !== 1 ? "pending" : "events");
       await load();
       message.success("事件已恢复");
     } catch (cause) {
@@ -727,7 +742,7 @@ function EventRow({
   const active = item.status === 0 || item.status === 1 || item.status === 3;
   const readOnly = item.status !== 1;
   const menuItems = [
-    ...(item.status === 0 || item.status === 3 ? [{ key: "delay", label: "推迟", onClick: () => onProcess("delay") }] : []),
+    ...(active ? [{ key: "delay", label: item.status === 3 ? "调整推迟" : "推迟", onClick: () => onProcess("delay") }] : []),
     ...(active ? [{ key: "abandon", label: "放弃", danger: true, onClick: () => onProcess("abandon") }] : []),
     ...(active ? [{ type: "divider" as const }] : []),
     { key: "delete", label: "删除", danger: true, icon: <Trash2 size={14} />, onClick: () => AntModal.confirm({
@@ -761,7 +776,7 @@ function EventRow({
         <div className="event-card-info-row">
           <Space size={8} wrap>
             {!board && item.category_name && <Tag className="event-category-tag" color={item.category_color}>{item.category_name}</Tag>}
-            {item.delay_until && <Typography.Text type="secondary">推迟至 {item.delay_until}</Typography.Text>}
+            {item.status === 3 && <Tooltip title={item.delay_note || undefined}><Typography.Text type="secondary">{item.delay_until ? `推迟至 ${item.delay_until}` : "待手动恢复"}</Typography.Text></Tooltip>}
             <button type="button" className="event-action-summary" aria-expanded={expanded} onClick={(event) => { event.stopPropagation(); onToggle(); }}>
               <ListChecks size={15} strokeWidth={1.8} aria-hidden="true" />
               行动 {item.completed_action_count}/{item.action_count}
@@ -769,8 +784,9 @@ function EventRow({
           </Space>
           <Space size={6} onClick={(event) => event.stopPropagation()}>
             {item.status === 4 && <Button size="small" type="text" icon={<RotateCcw size={14} />} onClick={onRestore}>恢复</Button>}
+            {item.status === 3 && <Button size="small" type="primary" icon={<RotateCcw size={14} />} onClick={onRestore}>{item.delay_resume_status === 1 ? "恢复进行" : "恢复待处理"}</Button>}
             {item.status === 1 && canFinish && <Button size="small" type="primary" icon={<Check size={14} />} onClick={onComplete}>完成</Button>}
-            {(item.status === 0 || item.status === 3) && <Button size="small" type="primary" onClick={() => onProcess("self")}>去处理</Button>}
+            {item.status === 0 && <Button size="small" type="primary" onClick={() => onProcess("self")}>去处理</Button>}
           </Space>
         </div>
       </div>
@@ -1250,7 +1266,10 @@ function ProcessModal({
     if (data) {
       const initialEventValues = {
         title: data.event.title,
+        delay_until: data.event.delay_until ? dayjs(data.event.delay_until) : undefined,
+        delay_note: data.event.delay_note,
       };
+      form.resetFields();
       form.setFieldsValue(initialEventValues);
       setEventValues(initialEventValues);
       setSteps([
@@ -1277,7 +1296,7 @@ function ProcessModal({
     mode === "self"
       ? "拆解行动"
       : mode === "delay"
-        ? "推迟处理"
+        ? (event.status === 3 ? "调整推迟" : "推迟事件")
         : "放弃事件";
   const addActionAfter = (index: number) => {
     const previous = steps[index];
@@ -1360,28 +1379,17 @@ function ProcessModal({
       abandon_reason: values.abandon_reason as string,
     });
   };
-  const dateField = (name: string, label: string, required = false) => (
-    <Form.Item
-      name={name}
-      label={label}
-      rules={
-        required ? [{ required: true, message: `请选择${label}` }] : undefined
-      }
-    >
-      <DatePicker className="full-width" format="YYYY-MM-DD" />
-    </Form.Item>
-  );
   return (
     <AntModal
       open
       title={title}
       onCancel={onClose}
       footer={null}
-      width={640}
+      width={mode === "delay" ? 480 : 640}
       destroyOnHidden
       className="process-action-modal"
-      wrapClassName="process-action-modal-wrap"
-      styles={{ body: { display: "flex", minHeight: 0, overflow: "hidden" } }}
+      wrapClassName={mode === "delay" ? undefined : "process-action-modal-wrap"}
+      styles={mode === "delay" ? undefined : { body: { display: "flex", minHeight: 0, overflow: "hidden" } }}
     >
       <Form
         form={form}
@@ -1516,8 +1524,14 @@ function ProcessModal({
             </>
           ) : mode === "delay" ? (
             <div className="form-grid">
-              {dateField("delay_until", "重新处理日期")}
-              <Form.Item className="full" name="delay_note" label="备注">
+              <Form.Item name="delay_until" label="恢复日期（可选）" rules={[{
+                validator: (_, value: Dayjs | undefined) => !value || value.isAfter(dayjs(), "day")
+                  ? Promise.resolve() : Promise.reject(new Error("恢复日期须晚于今天")),
+              }]}>
+                <DatePicker className="full-width" format="YYYY-MM-DD" placeholder="不设置日期"
+                  disabledDate={(date) => !date.isAfter(dayjs(), "day")} />
+              </Form.Item>
+              <Form.Item className="full" name="delay_note" label="推迟原因（可选）">
                 <Input.TextArea autoSize={{ minRows: 3, maxRows: 5 }} />
               </Form.Item>
             </div>
@@ -1540,7 +1554,7 @@ function ProcessModal({
               2分钟小事直接完成
             </Checkbox>
           )}
-          <div className="form-footer-actions">
+          <div className="form-footer-actions" style={mode === "delay" ? { display: "flex", gap: 8 } : undefined}>
             <Button
               onClick={
                 step === 1 && mode === "self" ? () => setStep(0) : onClose

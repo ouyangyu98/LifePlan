@@ -16,6 +16,7 @@ export interface Event {
   history_note?: string;
   delay_until?: string;
   delay_note?: string;
+  delay_resume_status?: 0 | 1;
   abandon_reason?: string;
   target?: string;
   deadline?: string;

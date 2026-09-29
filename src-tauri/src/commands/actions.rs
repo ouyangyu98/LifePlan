@@ -36,6 +36,25 @@ pub fn list_actions(conn: &Connection) -> rusqlite::Result<Vec<Action>> {
     let result = q.query_map([space], row_to_action)?.collect();
     result
 }
+
+pub(super) fn validate_schedulable_event(
+    conn: &Connection,
+    space: &str,
+    action_id: i64,
+) -> Result<(), String> {
+    super::events::restore_due_delays(conn).map_err(|error| error.to_string())?;
+    let available: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM actions a
+         LEFT JOIN events e ON e.id=a.event_id AND e.space_id=a.space_id
+         WHERE a.id=?1 AND a.space_id=?2 AND a.deleted_at IS NULL
+           AND (a.event_id IS NULL OR (e.deleted_at IS NULL AND e.status=1)))",
+        params![action_id, space], |row| row.get(0),
+    ).map_err(|error| error.to_string())?;
+    if !available {
+        return Err("行动不可安排，请先在事件篮恢复所属事件".into());
+    }
+    Ok(())
+}
 fn valid_hours(h: f64) -> bool {
     [0.0, 0.5, 1.0, 1.5, 2.0].contains(&h)
 }

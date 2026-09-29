@@ -173,7 +173,7 @@ fn v18_upgrade_is_repeatable_and_preserves_existing_schedule() {
     run_migrations(&mut conn).unwrap();
     run_migrations(&mut conn).unwrap();
     let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-    assert_eq!(version, 21);
+    assert_eq!(version, crate::db::migrations::CURRENT_SCHEMA_VERSION);
     assert!(ai_tasks::list_tasks(&conn, "2026-09-29").unwrap().is_empty());
     assert_eq!(serde_json::to_value(daily_schedule::slot_query(&conn, "2026-09-29").unwrap()).unwrap(), before);
     let space = current_space_id(&conn).unwrap();
@@ -501,7 +501,7 @@ fn v20_upgrade_recovers_afternoon_attachments_once_and_preserves_all_records() {
     assert_eq!(conn.query_row("SELECT COUNT(*) FROM ai_tasks", [], |row| row.get::<_, i64>(0)).unwrap(), 5);
     assert_eq!(conn.query_row("SELECT COUNT(*) FROM actions", [], |row| row.get::<_, i64>(0)).unwrap(), 4);
     assert_eq!(conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
-    assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i32>(0)).unwrap(), 21);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i32>(0)).unwrap(), crate::db::migrations::CURRENT_SCHEMA_VERSION);
     conn.execute("UPDATE daily_schedule_slots SET start_time='16:00',end_time='17:00' WHERE id=202", []).unwrap();
     run_migrations(&mut conn).unwrap();
     assert!(ai_tasks::list_tasks(&conn, "2026-09-29").unwrap().iter().all(|task| task.slot_id == Some(202)));
