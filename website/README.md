@@ -63,6 +63,8 @@ node --test tests/website/site-ui.test.mjs
 UI test screenshots go to the ignored `personal.local/website-check` directory.
 Tests cover desktop/mobile overflow, image loading, the first viewport,
 navigation, gallery keyboard interaction, the image dialog, FAQs and downloads.
+Set `WEBSITE_REQUIRE_DOWNLOADS=1` after publication to require working links
+for all three platforms and to check expanded checksums on mobile.
 
 ## Deployment
 

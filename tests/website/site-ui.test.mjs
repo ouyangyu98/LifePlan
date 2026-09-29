@@ -8,6 +8,7 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || "playwright");
 const base = process.env.WEBSITE_TEST_URL || "http://127.0.0.1:1423/life/";
 const screenshots = process.env.UI_SCREENSHOT_DIR || "personal.local/website-check";
+const requireDownloads = process.env.WEBSITE_REQUIRE_DOWNLOADS === "1";
 
 test("website renders real assets, responsive layouts, accessible navigation, gallery and honest downloads", { timeout: 90000 }, async () => {
   const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -57,10 +58,14 @@ test("website renders real assets, responsive layouts, accessible navigation, ga
       assert.match(await anchor.getAttribute("rel"), /noopener/);
       assert.match(await anchor.getAttribute("href"), /^https:\/\/github\.com\//);
     }
+    assert.equal(await page.locator(".download-card").count(), 3);
     for (const card of await page.locator(".download-card").all()) {
       const download = card.locator(".download-button");
+      if (requireDownloads) assert.ok(await download.getAttribute("href"), "Every platform must be downloadable");
       if (await download.getAttribute("href")) {
         assert.match(await download.getAttribute("href"), /^https:\/\/github\.com\/ouyangyu98\/LifePlan\/releases\/download\//);
+        await card.locator(".checksum summary").click();
+        assert.match(await card.locator(".checksum code").textContent(), /^[a-f0-9]{64}$/);
       } else {
         assert.equal(await download.isDisabled(), true);
         assert.match(await download.textContent(), /准备中/);
@@ -68,6 +73,12 @@ test("website renders real assets, responsive layouts, accessible navigation, ga
     }
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(base);
+    if (requireDownloads) {
+      for (const summary of await page.locator(".checksum summary").all()) await summary.click();
+      await page.locator(".installation-note summary").click();
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+      await page.locator("#downloads").screenshot({ path: path.join(screenshots, "mobile-downloads.png") });
+    }
     await page.getByRole("button", { name: "打开导航", exact: true }).click();
     await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "与 AI 并行", exact: true }).click();
     assert.equal(await page.getByRole("button", { name: "打开导航", exact: true }).getAttribute("aria-expanded"), "false");
