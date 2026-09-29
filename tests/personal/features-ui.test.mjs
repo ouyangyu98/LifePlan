@@ -344,6 +344,7 @@ test("daily calendar marks dates used by Today Tasks", { timeout: 60000 }, async
     await page.locator(".daily-date-panel .ant-picker").click();
     const panel = page.locator(".ant-picker-dropdown:visible");
     await panel.waitFor();
+    await panel.locator(".daily-date-used-dot").nth(1).waitFor();
     assert.equal(await panel.locator(".daily-date-used-dot").count(), 2);
     assert.equal(await panel.locator("[aria-label='这天使用过今日事']").count(), 2);
     const positions = await panel.locator(".daily-date-cell").evaluateAll((cells) => cells.map((cell) => {

@@ -62,13 +62,14 @@ const SELECT_TASK: &str =
                  WHEN linked.status=2 THEN 'paused'
                  WHEN t.status='completed' THEN 'queued' ELSE t.status END,
             t.start_time,t.end_time,COALESCE(linked.description,''),t.result,t.created_at,
-            MAX(t.updated_at,linked.updated_at,e.updated_at),linked.id,e.title,
-            (linked.status=2 OR e.status IN (4,5))
+            MAX(t.updated_at,linked.updated_at,COALESCE(e.updated_at,0)),linked.id,COALESCE(e.title,''),
+            (linked.status=2 OR COALESCE(e.status IN (4,5),0))
      FROM ai_tasks t JOIN actions a ON a.id=t.action_id AND a.space_id=t.space_id
      JOIN actions linked ON linked.id=t.linked_action_id AND linked.space_id=t.space_id
-     JOIN events e ON e.id=linked.event_id AND e.space_id=t.space_id
+     LEFT JOIN events e ON e.id=linked.event_id AND e.space_id=t.space_id
      WHERE t.space_id=?1 AND t.deleted_at IS NULL AND a.deleted_at IS NULL
-       AND linked.deleted_at IS NULL AND e.deleted_at IS NULL";
+       AND linked.deleted_at IS NULL
+       AND (linked.event_id IS NULL OR (e.id IS NOT NULL AND e.deleted_at IS NULL))";
 
 fn sync_completion(conn: &Connection, space: &str, action_id: i64, status: &AiTaskStatus, timestamp: i64) -> Result<(), String> {
     let completed = matches!(status, AiTaskStatus::Completed);
@@ -122,14 +123,14 @@ pub(super) fn create_task_impl(state: &AppState, payload: NewAiTask) -> Result<A
     ).map_err(|error| error.to_string())?;
     if !scheduled { return Err("主行动未安排到当天，请刷新后重试".into()); }
     let linked: Option<(String, String, i64)> = tx.query_row(
-        "SELECT a.title,COALESCE(a.description,''),MAX(a.updated_at,e.updated_at)
-         FROM actions a JOIN events e ON e.id=a.event_id AND e.space_id=a.space_id
+        "SELECT a.title,COALESCE(a.description,''),MAX(a.updated_at,COALESCE(e.updated_at,0))
+         FROM actions a LEFT JOIN events e ON e.id=a.event_id AND e.space_id=a.space_id
          WHERE a.id=?1 AND a.space_id=?2 AND a.deleted_at IS NULL AND a.status=0
-           AND e.deleted_at IS NULL AND e.status=1",
+           AND (a.event_id IS NULL OR (e.deleted_at IS NULL AND e.status=1))",
         params![payload.linked_action_id, space],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     ).optional().map_err(|error| error.to_string())?;
-    let (title, notes, linked_version) = linked.ok_or("请选择事件篮中进行中事件的待办行动")?;
+    let (title, notes, linked_version) = linked.ok_or("请选择可安排的待办行动")?;
     let exists: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM ai_tasks WHERE space_id=?1 AND list_date=?2 AND action_id=?3
          AND linked_action_id=?4 AND deleted_at IS NULL)",

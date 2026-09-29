@@ -60,6 +60,20 @@ async function fixture(page) {
         ].map(event => ({ ...event, action_count: actions.filter(action => action.event_id === event.id).length,
           completed_action_count: actions.filter(action => action.event_id === event.id && action.status === 1).length }));
         if (cmd === "get_event_categories") return [];
+        if (cmd === "get_recurring_actions") return [{ id: 20, title: "每日 AI 整理", estimated_hours: 2, frequency_unit: "daily", frequency_count: 1, sort_order: 0 }];
+        if (cmd === "create_action" || cmd === "create_action_from_recurring") {
+          const action = {
+            ...(cmd === "create_action" ? args.payload : { title: "每日 AI 整理", estimated_hours: 2 }),
+            id: Math.max(...actions.map(action => action.id)) + 1, status: 0, event_id: null,
+          };
+          actions.push(action); save(); return structuredClone(action);
+        }
+        if (cmd === "assign_daily_slot_action") {
+          const slot = slots.find(slot => slot.id === args.slotId);
+          slot.action_id = args.actionId;
+          slot.action = actions.find(action => action.id === args.actionId);
+          return structuredClone(slot);
+        }
         if (cmd === "complete_action" || cmd === "restore_action") {
           const action = actions.find(action => action.id === args.id);
           action.status = cmd === "complete_action" ? 1 : 0;
@@ -98,7 +112,7 @@ async function fixture(page) {
           for (const key of ["action_id", "action", "actual_notes", "met_expectation", "focused"]) [source[key], target[key]] = [target[key], source[key]];
           return structuredClone([source, target]);
         }
-        if (cmd === "get_daily_used_dates" || cmd === "get_recurring_actions") return [];
+        if (cmd === "get_daily_used_dates") return [];
         if (cmd === "plugin:event|listen") return 1;
         return null;
       },
@@ -111,6 +125,7 @@ const shot = async (page, name) => {
   await page.screenshot({ path: path.join(screenshots, name), fullPage: true });
 };
 const drawer = page => page.locator(".daily-ai-editor");
+const picker = page => page.getByRole("dialog", { name: /^安排行动/ });
 const chooseStatus = async (page, name) => {
   await drawer(page).getByRole("combobox", { name: "任务状态", exact: true }).click();
   await page.getByRole("option", { name, exact: true }).click();
@@ -123,11 +138,13 @@ const openAdd = async (page, index = 0) => {
   const plan = page.locator(".daily-plan-main").nth(index);
   await plan.hover();
   await plan.getByRole("button", { name: /添加 AI 任务/ }).click();
-  await drawer(page).getByRole("combobox", { name: /选择行动$/ }).waitFor();
+  await picker(page).locator(".ant-radio-button-wrapper").filter({ hasText: "事件行动" }).waitFor();
+  assert.equal(await drawer(page).count(), 0);
 };
 const chooseAction = async (page, name) => {
-  await drawer(page).getByRole("combobox", { name: /选择行动$/ }).click();
-  await page.getByRole("option", { name, exact: true }).click();
+  await picker(page).getByRole("button", { name: "平铺视图", exact: true }).click();
+  await picker(page).locator(".daily-action-picker-item").filter({ hasText: name }).click();
+  await picker(page).waitFor({ state: "hidden" });
 };
 
 test("AI tasks keep idle rows compact, persist, follow actions and do not complete parents", { timeout: 90000 }, async () => {
@@ -146,13 +163,14 @@ test("AI tasks keep idle rows compact, persist, follow actions and do not comple
     assert.equal(await page.locator(".daily-ai-add").first().evaluate(el => getComputedStyle(el).opacity), "0");
     await shot(page, "ai-empty-desktop.png");
     await openAdd(page);
-    assert.equal(await drawer(page).getByRole("textbox", { name: /任务名称$/ }).count(), 0);
-    await drawer(page).getByRole("combobox", { name: /选择行动$/ }).click();
-    assert.deepEqual(await page.getByRole("option").allTextContents(), ["整理竞品材料", "生成一份包含边界情况与例外路径的完整需求分析文档"]);
-    await page.getByRole("option", { name: "整理竞品材料", exact: true }).click();
-    await drawer(page).getByText("整理三个竞品的主要流程", { exact: true }).waitFor();
+    await picker(page).getByRole("button", { name: "平铺视图", exact: true }).waitFor();
+    assert.deepEqual(await picker(page).locator(".daily-action-preview-title-text").allTextContents(), ["整理竞品材料", "生成一份包含边界情况与例外路径的完整需求分析文档"]);
+    await picker(page).getByRole("button", { name: "按事件视图", exact: true }).click();
+    assert.equal(await picker(page).locator(".daily-event-action-parent").count(), 2);
     await shot(page, "ai-pool-picker-desktop.png");
-    await saveTask(page);
+    await chooseAction(page, "整理竞品材料");
+    assert.equal(await page.evaluate(() => window.aiFixture.tasks[0].start_time), "09:00");
+    assert.equal(await page.evaluate(() => window.aiFixture.tasks[0].end_time), "10:00");
     await page.locator(".daily-ai-task").getByText("整理竞品材料", { exact: true }).waitFor();
     assert.equal(await page.locator(".daily-ai-tasks").count(), 1);
     const heights = await page.locator(".daily-schedule-row").evaluateAll(rows => rows.map(row => row.getBoundingClientRect().height));
@@ -175,6 +193,7 @@ test("AI tasks keep idle rows compact, persist, follow actions and do not comple
 
     await openAdd(page, 1);
     await chooseAction(page, "生成一份包含边界情况与例外路径的完整需求分析文档");
+    await page.locator(".daily-ai-task").filter({ hasText: "生成一份包含边界情况与例外路径的完整需求分析文档" }).click();
     await chooseStatus(page, "执行中");
     await drawer(page).getByRole("combobox", { name: "计划结束时间", exact: true }).click();
     await page.getByRole("option", { name: "11:30", exact: true }).click();
@@ -229,19 +248,20 @@ test("AI editor keeps drafts on failure, validates times, isolates dates and ser
     await page.goto(`${baseUrl}/#/daily-list`);
     await openAdd(page);
     await chooseAction(page, "整理竞品材料");
+    await page.locator(".daily-ai-task").click();
     await drawer(page).getByRole("textbox", { name: "结果与记录", exact: true }).fill("保留草稿");
     await drawer(page).getByRole("combobox", { name: "计划结束时间", exact: true }).click();
     await page.getByRole("option", { name: "08:30", exact: true }).click();
     await drawer(page).getByRole("button", { name: "保存任务", exact: true }).click();
     await drawer(page).getByText("需晚于开始时间，不能跨天", { exact: true }).waitFor();
-    assert.equal(await page.evaluate(() => window.aiFixture.calls.filter(call => call.cmd === "create_ai_task").length), 0);
+    assert.equal(await page.evaluate(() => window.aiFixture.calls.filter(call => call.cmd === "update_ai_task").length), 0);
     await drawer(page).getByRole("combobox", { name: "计划结束时间", exact: true }).click();
     await page.getByRole("option", { name: "24:00", exact: true }).click();
     await page.evaluate(() => { window.aiFixture.failSave = true; });
     await drawer(page).getByRole("button", { name: "保存任务", exact: true }).click();
     await drawer(page).getByText("模拟保存失败", { exact: true }).waitFor();
     assert.equal(await drawer(page).getByRole("textbox", { name: "结果与记录", exact: true }).inputValue(), "保留草稿");
-    assert.equal(await page.locator(".daily-ai-task").count(), 0);
+    assert.equal(await page.evaluate(() => window.aiFixture.tasks[0].result), "");
     await drawer(page).getByRole("button", { name: /^取\s*消$/ }).click();
     await page.getByRole("button", { name: "继续编辑", exact: true }).click();
     await page.evaluate(() => { window.aiFixture.failSave = false; window.aiFixture.holdSave = true; });
@@ -295,19 +315,18 @@ test("AI attachments share pool actions and recover from pool loading failures",
     await page.locator(".daily-plan-main").first().waitFor();
     await page.evaluate(() => { window.aiFixture.failPool = true; });
     await openAdd(page);
-    await drawer(page).getByText("事件篮加载失败", { exact: true }).waitFor();
-    assert.equal(await drawer(page).getByRole("button", { name: "保存任务", exact: true }).isDisabled(), true);
+    await picker(page).getByText("事件篮加载失败", { exact: true }).waitFor();
+    assert.equal(await picker(page).locator(".daily-action-picker-item").count(), 0);
     await page.evaluate(() => { window.aiFixture.failPool = false; });
-    await drawer(page).getByRole("button", { name: /^重\s*试$/ }).click();
+    await picker(page).getByRole("button", { name: /^重\s*试$/ }).click();
     await chooseAction(page, "整理竞品材料");
-    await saveTask(page);
     await page.locator(".daily-ai-task").waitFor();
     await openAdd(page);
-    await drawer(page).getByRole("combobox", { name: /选择行动$/ }).click();
-    assert.deepEqual(await page.getByRole("option").allTextContents(), ["生成一份包含边界情况与例外路径的完整需求分析文档"]);
-    await page.getByRole("option", { name: "生成一份包含边界情况与例外路径的完整需求分析文档", exact: true }).click();
-    await drawer(page).getByRole("button", { name: "去事件篮", exact: true }).click();
-    await page.getByRole("button", { name: "放弃修改", exact: true }).click();
+    await picker(page).getByRole("button", { name: "平铺视图", exact: true }).waitFor();
+    assert.deepEqual(await picker(page).locator(".daily-action-preview-title-text").allTextContents(), ["生成一份包含边界情况与例外路径的完整需求分析文档"]);
+    await picker(page).getByRole("button", { name: /^取\s*消$/ }).click();
+    await picker(page).waitFor({ state: "hidden" });
+    await page.getByRole("link", { name: "事件篮", exact: true }).click();
     const project = page.locator(".record-card").filter({ hasText: "项目" });
     await project.getByRole("button", { name: "行动 0/2", exact: true }).click();
     await project.locator("[data-event-action-id='3']").getByRole("button", { name: "完成", exact: true }).click();
@@ -342,9 +361,82 @@ test("AI attachments share pool actions and recover from pool loading failures",
     assert.equal(await page.locator(".daily-ai-task").count(), 0);
     await openAdd(page);
     await chooseAction(page, "事件篮统一改名");
-    await saveTask(page);
     assert.equal(await page.evaluate(() => window.aiFixture.tasks.length), 1);
     assert.equal(await page.evaluate(() => window.aiFixture.calls.filter(call => call.cmd === "create_action" || call.cmd === "delete_action").length), 0);
   } catch (error) { await shot(page, "ai-pool-failure.png"); throw error; }
+  finally { await browser.close(); }
+});
+
+test("AI entry reuses the action picker with all three sources and retry protection", { timeout: 90000 }, async () => {
+  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const page = await browser.newPage({ viewport: { width: 1050, height: 850 }, reducedMotion: "reduce" });
+  await fixture(page);
+  try {
+    await page.goto(`${baseUrl}/#/daily-list`);
+    await page.locator(".daily-plan-cell").nth(3).click();
+    const originalTabs = await picker(page).locator(".ant-radio-button-wrapper").allTextContents();
+    await picker(page).getByRole("button", { name: "按事件视图", exact: true }).click();
+    await picker(page).getByRole("button", { name: /^取\s*消$/ }).click();
+    await picker(page).waitFor({ state: "hidden" });
+    const originalSlots = await page.evaluate(() => JSON.stringify(window.aiFixture.slots));
+    await openAdd(page);
+    assert.deepEqual(await picker(page).locator(".ant-radio-button-wrapper").allTextContents(), originalTabs);
+    await picker(page).locator(".daily-event-action-parent").first().waitFor();
+    assert.equal(await picker(page).locator(".daily-event-action-parent").count(), 2);
+    await picker(page).getByPlaceholder("搜索行动标题关键词").fill("不存在的行动");
+    await picker(page).getByText("没有符合条件的行动", { exact: true }).waitFor();
+    await picker(page).getByPlaceholder("搜索行动标题关键词").fill("");
+    await shot(page, "shared-ai-picker-desktop.png");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await shot(page, "shared-ai-picker-mobile.png");
+    assert.equal(await picker(page).evaluate(el => el.scrollWidth <= el.clientWidth), true);
+    await page.setViewportSize({ width: 1050, height: 850 });
+    await picker(page).locator(".daily-event-action-parent").filter({ hasText: "项目" }).click();
+    await page.evaluate(() => { window.aiFixture.failSave = true; });
+    await picker(page).locator(".daily-action-picker-item").filter({ hasText: "整理竞品材料" }).click();
+    await picker(page).getByText("模拟保存失败", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => window.aiFixture.tasks.length), 0);
+    assert.equal(await page.evaluate(() => JSON.stringify(window.aiFixture.slots)), originalSlots);
+    await page.evaluate(() => { window.aiFixture.failSave = false; window.aiFixture.holdSave = true; });
+    await picker(page).locator(".daily-action-picker-item").filter({ hasText: "整理竞品材料" }).evaluate(button => { button.click(); button.click(); });
+    await page.waitForFunction(() => typeof window.releaseAiSave === "function");
+    assert.equal(await picker(page).getByRole("button", { name: /^取\s*消$/ }).isDisabled(), true);
+    assert.equal(await page.evaluate(() => window.aiFixture.calls.filter(call => call.cmd === "create_ai_task").length), 2);
+    await page.evaluate(() => { window.aiFixture.holdSave = false; window.releaseAiSave(); });
+    await picker(page).waitFor({ state: "hidden" });
+
+    await openAdd(page);
+    await picker(page).locator(".ant-radio-button-wrapper").filter({ hasText: "重复行动" }).click();
+    await page.evaluate(() => { window.aiFixture.failSave = true; });
+    await picker(page).locator(".daily-action-picker-item").filter({ hasText: "每日 AI 整理" }).click();
+    await picker(page).getByText("模拟保存失败", { exact: true }).waitFor();
+    await page.evaluate(() => { window.aiFixture.failSave = false; });
+    await picker(page).locator(".daily-action-picker-item").filter({ hasText: "每日 AI 整理" }).click();
+    await picker(page).waitFor({ state: "hidden" });
+    assert.equal(await page.evaluate(() => window.aiFixture.calls.filter(call => call.cmd === "create_action_from_recurring").length), 1);
+    await page.locator(".daily-ai-task").filter({ hasText: "每日 AI 整理" }).waitFor();
+
+    await openAdd(page);
+    await picker(page).locator(".ant-radio-button-wrapper").filter({ hasText: "临时行动" }).click();
+    await picker(page).getByRole("textbox", { name: /行动标题$/ }).fill("临时 AI 检查");
+    await page.evaluate(() => { window.aiFixture.failSave = true; });
+    await picker(page).getByRole("button", { name: "创建并安排", exact: true }).click();
+    await picker(page).getByText("模拟保存失败", { exact: true }).waitFor();
+    await page.evaluate(() => { window.aiFixture.failSave = false; });
+    await picker(page).getByRole("button", { name: "创建并安排", exact: true }).click();
+    await picker(page).waitFor({ state: "hidden" });
+    assert.equal(await page.evaluate(() => window.aiFixture.calls.filter(call => call.cmd === "create_action").length), 1);
+    await page.locator(".daily-ai-task").filter({ hasText: "临时 AI 检查" }).waitFor();
+    assert.equal(await page.locator(".daily-ai-task").count(), 3);
+    assert.equal(await page.evaluate(() => JSON.stringify(window.aiFixture.slots)), originalSlots);
+    assert.equal(await page.evaluate(() => window.aiFixture.calls.filter(call => call.cmd === "assign_daily_slot_action").length), 0);
+    await page.getByLabel("已安排总时长 2 小时 30 分钟", { exact: true }).waitFor();
+
+    await page.locator(".daily-plan-cell").nth(3).click();
+    await chooseAction(page, "整理竞品材料");
+    assert.equal(await page.evaluate(() => window.aiFixture.slots[3].action_id), 3);
+    assert.equal(await page.evaluate(() => window.aiFixture.calls.filter(call => call.cmd === "assign_daily_slot_action").length), 1);
+    assert.equal(await page.locator(".daily-ai-task").count(), 3);
+  } catch (error) { await shot(page, "shared-ai-picker-failure.png"); throw error; }
   finally { await browser.close(); }
 });

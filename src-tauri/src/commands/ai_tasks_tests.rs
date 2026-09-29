@@ -1,4 +1,4 @@
-use super::{actions, ai_tasks, daily_schedule};
+use super::{actions, ai_tasks, daily_schedule, recurring_actions};
 use crate::db::{current_space_id, ensure_current_space, run_migrations, AppState};
 use crate::models::{AiTaskFields, AiTaskStatus, NewAiTask, UpdateAiTask};
 use rusqlite::{params, Connection};
@@ -319,4 +319,55 @@ fn failed_v19_migration_rolls_back_schema_and_records() {
     assert_eq!(conn.query_row("SELECT COUNT(*) FROM actions", [], |row| row.get::<_, i64>(0)).unwrap(), 4);
     assert_eq!(conn.query_row("SELECT COUNT(*) FROM ai_tasks", [], |row| row.get::<_, i64>(0)).unwrap(), 5);
     assert!(conn.prepare("SELECT linked_action_id FROM ai_tasks").is_err());
+}
+
+#[test]
+fn standalone_temporary_and_recurring_actions_support_ai_attachment_without_replacing_parent() {
+    let state = state();
+    let temporary = actions::create_action_impl(&state, serde_json::from_value(serde_json::json!({
+        "title": "Temporary AI", "estimated_hours": 0.5, "is_frog": 0
+    })).unwrap()).unwrap();
+    let template = recurring_actions::create_recurring_action_impl(&state, serde_json::from_value(serde_json::json!({
+        "title": "Recurring AI", "estimated_hours": 2, "is_frog": 0,
+        "frequency_unit": "daily", "frequency_count": 1
+    })).unwrap()).unwrap();
+    let recurring = recurring_actions::create_action_from_recurring_impl(&state, template.id).unwrap();
+    let before = serde_json::to_value(daily_schedule::slot_query(&state.db.lock().unwrap(), "2026-09-29").unwrap()).unwrap();
+    for source in [temporary, recurring] {
+        assert!(source.event_id.is_none());
+        let mut request = payload(); request.linked_action_id = source.id;
+        let task = ai_tasks::create_task_impl(&state, request).unwrap();
+        assert_eq!(task.title, source.title);
+        assert_eq!(task.event_title, "");
+        assert!(!task.read_only);
+        let mut completed = fields(); completed.status = AiTaskStatus::Completed;
+        let done = ai_tasks::update_task_impl(&state, UpdateAiTask { id: task.id, expected_updated_at: task.updated_at, fields: completed }).unwrap();
+        assert_eq!(done.status.as_str(), "completed");
+        let restored = ai_tasks::update_task_impl(&state, UpdateAiTask { id: done.id, expected_updated_at: done.updated_at, fields: fields() }).unwrap();
+        assert_eq!(restored.status.as_str(), "queued");
+        ai_tasks::delete_task_impl(&state, restored.id, restored.updated_at).unwrap();
+        assert!(actions::list_actions(&state.db.lock().unwrap()).unwrap().iter().any(|action| action.id == source.id));
+    }
+    assert_eq!(serde_json::to_value(daily_schedule::slot_query(&state.db.lock().unwrap(), "2026-09-29").unwrap()).unwrap(), before);
+}
+
+#[test]
+fn eventless_support_does_not_expose_actions_with_missing_or_foreign_events() {
+    let state = state();
+    // Simulate historical invalid references; normal writes enforce foreign keys.
+    state.db.lock().unwrap().pragma_update(None, "foreign_keys", false).unwrap();
+    for event_id in [999, 13] {
+        {
+            let conn = state.db.lock().unwrap();
+            conn.execute("INSERT OR IGNORE INTO local_spaces(space_id,created_at,updated_at) VALUES('foreign',1,1)", []).unwrap();
+            conn.execute("INSERT OR IGNORE INTO events(id,space_id,sync_id,title,status,created_at,updated_at) VALUES(13,'foreign','foreign-event','Foreign',1,1,1)", []).unwrap();
+            conn.execute("UPDATE actions SET event_id=?1 WHERE id=103", [event_id]).unwrap();
+        }
+        assert!(ai_tasks::create_task_impl(&state, payload()).is_err());
+        let conn = state.db.lock().unwrap();
+        let space = current_space_id(&conn).unwrap();
+        conn.execute("INSERT INTO ai_tasks(space_id,action_id,linked_action_id,list_date,title,created_at,updated_at) VALUES(?1,101,103,'2026-09-29','Hidden',1,1)", [&space]).unwrap();
+        assert!(ai_tasks::list_tasks(&conn, "2026-09-29").unwrap().is_empty());
+        conn.execute("DELETE FROM ai_tasks", []).unwrap();
+    }
 }
