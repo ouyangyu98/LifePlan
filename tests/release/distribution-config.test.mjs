@@ -38,6 +38,8 @@ test("every packaging workflow preserves the independent channel", () => {
     assert.match(workflow, /TAURI_SIGNING_PRIVATE_KEY_PASSWORD:/);
   }
   const workflow = read(".github/workflows/release.yml");
+  assert.match(workflow, /--tag "\$RELEASE_TAG"/);
+  assert.doesNotMatch(workflow, /^\s+GITHUB_REF_NAME:/m);
   assert.match(workflow, /--draft --verify-tag/);
   assert.ok(workflow.indexOf("gh release upload") < workflow.indexOf("--draft=false --latest"));
   assert.equal(JSON.parse(read("src-tauri/tauri.macos.conf.json")).bundle.macOS.signingIdentity, "-");
