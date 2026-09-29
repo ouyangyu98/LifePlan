@@ -1,5 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const repository = "ouyangyu98/LifePlan";
@@ -29,16 +30,13 @@ for (const { pattern, ...platform } of definitions) {
   if (!Number.isSafeInteger(asset.size) || asset.size <= 0 || asset.size > 300 * 1024 * 1024) {
     throw new Error(`Unexpected asset size for ${asset.name}.`);
   }
-  const download = await fetch(url, { signal: AbortSignal.timeout(180000) });
-  if (!download.ok || !download.body) throw new Error(`Download verification failed for ${asset.name}: ${download.status}`);
-  const hash = createHash("sha256");
-  let bytes = 0;
-  for await (const chunk of download.body) {
-    bytes += chunk.length;
-    if (bytes > asset.size) throw new Error(`Downloaded size exceeds the published size for ${asset.name}.`);
-    hash.update(chunk);
-  }
-  const sha256 = hash.digest("hex");
+  // curl uses the host's network/proxy configuration for GitHub asset redirects.
+  const binary = execFileSync("curl", [
+    "--fail", "--location", "--silent", "--show-error", "--max-time", "180",
+    "--proto", "=https", "--proto-redir", "=https", url.toString(),
+  ], { maxBuffer: asset.size + 1, stdio: ["ignore", "pipe", "pipe"] });
+  const bytes = binary.length;
+  const sha256 = createHash("sha256").update(binary).digest("hex");
   if (bytes !== asset.size || (asset.digest && asset.digest !== `sha256:${sha256}`)) {
     throw new Error(`Checksum or size mismatch for ${asset.name}.`);
   }

@@ -49,6 +49,7 @@ node scripts/website/sync-downloads.mjs
 ```
 
 This verifies every binary's size and SHA-256 before replacing the manifest.
+The download verification uses the host's existing `curl` executable.
 `GITHUB_TOKEN` is optional for GitHub API rate limits; it is never written to
 the generated website. The command fails without changing the manifest if
 any platform is missing or a binary cannot be verified.

@@ -130,7 +130,10 @@ async function main() {
   await rm(outputDirectory, { recursive: true, force: true });
   await mkdir(outputDirectory, { recursive: true });
 
-  const files = await deduplicateAllowedFiles(await listFiles(assetsDirectory));
+  // GitHub rewrites spaces in uploaded asset names. Normalize before generating
+  // updater URLs and checksums so every metadata entry matches the public asset.
+  const files = await deduplicateAllowedFiles((await listFiles(assetsDirectory))
+    .map(file => ({ ...file, name: file.name.replace(/\s+/g, ".") })));
   const latestJson = await createLatestJson(context, files, outputDirectory);
   const installerAssets = files.filter(({ name }) => /\.(?:exe|dmg)$/iu.test(name));
   const assets = findReleaseAssets([...installerAssets, latestJson]);

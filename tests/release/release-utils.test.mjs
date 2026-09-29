@@ -139,9 +139,9 @@ test("汇总脚本生成 latest.json 并去重同名同内容签名", () => {
     writeAsset("windows/LifePlan_1.0.5_x64-setup.exe", "windows-installer");
     writeAsset("windows/LifePlan_1.0.5_x64-setup.exe.sig", "windows-signature");
     writeAsset("duplicate/LifePlan_1.0.5_x64-setup.exe.sig", "windows-signature");
-    writeAsset("mac-arm/LifePlan_1.0.5_aarch64-apple-darwin.dmg", "mac-arm-installer");
-    writeAsset("mac-arm/LifePlan_1.0.5_aarch64-apple-darwin.app.tar.gz", "mac-arm-updater");
-    writeAsset("mac-arm/LifePlan_1.0.5_aarch64-apple-darwin.app.tar.gz.sig", "mac-arm-signature");
+    writeAsset("mac-arm/LifePlan OY_1.0.5_aarch64-apple-darwin.dmg", "mac-arm-installer");
+    writeAsset("mac-arm/LifePlan OY_1.0.5_aarch64-apple-darwin.app.tar.gz", "mac-arm-updater");
+    writeAsset("mac-arm/LifePlan OY_1.0.5_aarch64-apple-darwin.app.tar.gz.sig", "mac-arm-signature");
 
     execFileSync(process.execPath, [
       "scripts/release/validate-release-assets.mjs",
@@ -156,6 +156,8 @@ test("汇总脚本生成 latest.json 并去重同名同内容签名", () => {
     assert.equal(latest.platforms["windows-x86_64"].signature, "windows-signature");
     assert.equal(latest.platforms["darwin-aarch64"].signature, "mac-arm-signature");
     assert.equal(latest.platforms["darwin-x86_64"], undefined);
+    assert.match(latest.platforms["darwin-aarch64"].url, /LifePlan\.OY_/);
+    assert.doesNotMatch(latest.platforms["darwin-aarch64"].url, /%20/);
     assert.match(readFileSync(bodyFile, "utf8"), /下载 Windows 安装包/);
     assert.equal(readFileSync(join(outputDirectory, "LifePlan_1.0.5_x64-setup.exe.sig"), "utf8"), "windows-signature");
     const checksums = readFileSync(join(outputDirectory, "SHA256SUMS.txt"), "utf8").trim().split("\n");
