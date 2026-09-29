@@ -46,6 +46,42 @@ fn payload() -> NewAiTask {
 }
 
 #[test]
+fn completion_is_shared_across_daily_history_but_not_reviews_or_independent_actions() {
+    let state = state();
+    let child = ai_tasks::create_task_impl(&state, payload()).unwrap();
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute(
+            "UPDATE actions SET title='Parent' WHERE id=104", [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO daily_schedule_slots(space_id,list_date,start_time,end_time,action_id,actual_notes,focused,met_expectation,created_at,updated_at)
+             SELECT space_id,'2026-09-28','09:00','10:00',101,'Historical review',0,1,1,1
+             FROM daily_schedule_slots WHERE id=201", [],
+        ).unwrap();
+    }
+    for status in [1, 0] {
+        let action = if status == 1 {
+            actions::complete_action_impl(&state, 101).unwrap()
+        } else {
+            actions::restore_action_impl(&state, 101).unwrap()
+        };
+        let conn = state.db.lock().unwrap();
+        for date in ["2026-09-28", "2026-09-29", "2026-09-30"] {
+            let slots = daily_schedule::slot_query(&conn, date).unwrap();
+            let occurrences: Vec<_> = slots.iter().filter(|slot| slot.action_id == Some(101)).collect();
+            assert!(!occurrences.is_empty());
+            assert!(occurrences.iter().all(|slot| slot.action.as_ref().unwrap().status == status));
+        }
+        assert_eq!(action.status, status);
+        assert_eq!(conn.query_row("SELECT actual_notes FROM daily_schedule_slots WHERE id=201", [], |r| r.get::<_, String>(0)).unwrap(), "Keep review");
+        assert_eq!(conn.query_row("SELECT actual_notes FROM daily_schedule_slots WHERE list_date='2026-09-28'", [], |r| r.get::<_, String>(0)).unwrap(), "Historical review");
+        assert_eq!(conn.query_row("SELECT status FROM actions WHERE id=104", [], |r| r.get::<_, i32>(0)).unwrap(), 0);
+        assert_eq!(ai_tasks::list_tasks(&conn, "2026-09-29").unwrap().iter().find(|task| task.id == child.id).unwrap().status.as_str(), "queued");
+    }
+}
+
+#[test]
 fn same_ai_action_can_attach_to_multiple_slots_but_not_twice_in_one_slot() {
     let state = state();
     let first = ai_tasks::create_task_impl(&state, payload()).unwrap();

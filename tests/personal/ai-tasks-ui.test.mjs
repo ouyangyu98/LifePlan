@@ -92,9 +92,16 @@ async function fixture(page) {
           save(); return structuredClone(withSource(next));
         }
         if (cmd === "complete_action" || cmd === "restore_action") {
+          if (data.failActionChange) throw Error("模拟行动状态保存失败");
           const action = actions.find(action => action.id === args.id);
           action.status = cmd === "complete_action" ? 1 : 0;
           save(); return structuredClone(action);
+        }
+        if (cmd === "update_daily_slot_review") {
+          if (data.failSave) throw Error("模拟保存失败");
+          const slot = slots.find(slot => slot.id === args.payload.id);
+          Object.assign(slot, args.payload);
+          save(); return structuredClone(slot);
         }
         if (cmd === "get_daily_schedule") return { list_date: args.listDate, slots: structuredClone(slots).map(slot => ({ ...slot, list_date: args.listDate })) };
         if (cmd === "get_ai_tasks") {
@@ -178,6 +185,86 @@ const chooseAction = async (page, name) => {
   await picker(page).locator(".daily-action-picker-item").filter({ hasText: name }).click();
   await picker(page).waitFor({ state: "hidden" });
 };
+
+test("completion and restore update every occurrence without changing independent reviews or AI actions", { timeout: 90000 }, async () => {
+  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await fixture(page);
+  const rows = page.locator(".daily-schedule-row");
+  const dialog = () => page.getByRole("dialog", { name: /^时间段详情/ });
+  const statuses = () => page.locator(".daily-plan-cell").evaluateAll(cells =>
+    cells.map(cell => cell.classList.contains("completed") ? "completed" : cell.classList.contains("pending") ? "pending" : "empty"));
+  const waitStatuses = expected => page.waitForFunction(expected =>
+    JSON.stringify([...document.querySelectorAll(".daily-plan-cell")].map(cell =>
+      cell.classList.contains("completed") ? "completed" : cell.classList.contains("pending") ? "pending" : "empty")) === JSON.stringify(expected), expected);
+  const chooseDate = async date => {
+    await page.locator(".daily-date-panel input").fill(date);
+    await page.locator(".daily-date-panel input").press("Enter");
+  };
+  try {
+    await page.goto(`${baseUrl}/#/daily-list`);
+    await rows.first().waitFor();
+    await page.evaluate(() => {
+      // Identical titles must not cause updates to a different action ID.
+      window.aiFixture.actions[1].title = window.aiFixture.actions[0].title;
+      sessionStorage.setItem("ai-fixture-actions", JSON.stringify(window.aiFixture.actions));
+    });
+    await page.reload();
+    await openAdd(page, 0);
+    await chooseAction(page, "整理竞品材料");
+    await openAdd(page, 2);
+    await chooseAction(page, "准备项目需求");
+    const originalFirstReview = await rows.nth(0).locator(".daily-review-cell").textContent();
+    await rows.nth(1).locator(".daily-review-cell").click();
+    await dialog().locator("textarea").fill("第二段独立复盘");
+    await dialog().getByRole("checkbox", { name: "已完成行动", exact: true }).check();
+    await dialog().getByRole("button", { name: "保存复盘", exact: true }).click();
+    await dialog().waitFor({ state: "hidden" });
+    await waitStatuses(["completed", "completed", "completed", "empty"]);
+    await rows.nth(2).locator(".daily-ai-task.completed").waitFor();
+    assert.equal(await rows.nth(0).locator(".daily-ai-task.queued").count(), 1);
+    assert.equal(await rows.nth(0).locator(".daily-review-cell").textContent(), originalFirstReview);
+    assert.match(await rows.nth(1).locator(".daily-review-cell").textContent(), /第二段独立复盘/);
+    await shot(page, "completion-all-occurrences.png");
+    await page.reload();
+    await waitStatuses(["completed", "completed", "completed", "empty"]);
+    await chooseDate("2026年09月27日");
+    await page.waitForFunction(() => document.querySelector(".daily-statistics time")?.dateTime === "2026-09-27");
+    assert.deepEqual(await statuses(), ["completed", "completed", "completed", "empty"]);
+    await chooseDate("2026年09月29日");
+    await rows.nth(2).locator(".daily-ai-task.completed").waitFor();
+
+    await rows.nth(0).locator(".daily-review-cell").click();
+    await page.evaluate(() => { window.aiFixture.failActionChange = true; });
+    await dialog().getByRole("button", { name: "恢复行动", exact: true }).click();
+    await page.getByText("模拟行动状态保存失败", { exact: true }).waitFor();
+    assert.deepEqual(await statuses(), ["completed", "completed", "completed", "empty"]);
+    await page.evaluate(() => { window.aiFixture.failActionChange = false; });
+    await dialog().getByRole("button", { name: "恢复行动", exact: true }).click();
+    await waitStatuses(["pending", "pending", "completed", "empty"]);
+    await rows.nth(2).locator(".daily-ai-task.queued").waitFor();
+    assert.equal(await rows.nth(0).locator(".daily-review-cell").textContent(), originalFirstReview);
+    assert.match(await rows.nth(1).locator(".daily-review-cell").textContent(), /第二段独立复盘/);
+    await dialog().locator(".ant-modal-close").click();
+    await dialog().waitFor({ state: "hidden" });
+    await page.reload();
+    await waitStatuses(["pending", "pending", "completed", "empty"]);
+    await chooseDate("2026年09月27日");
+    await page.waitForFunction(() => document.querySelector(".daily-statistics time")?.dateTime === "2026-09-27");
+    assert.deepEqual(await statuses(), ["pending", "pending", "completed", "empty"]);
+    await chooseDate("2026年09月29日");
+    await rows.nth(0).locator(".daily-review-cell").click();
+    await page.evaluate(() => { window.aiFixture.failActionChange = true; });
+    await dialog().getByRole("checkbox", { name: "已完成行动", exact: true }).check();
+    await dialog().getByRole("button", { name: "保存复盘", exact: true }).click();
+    await page.getByText("模拟行动状态保存失败", { exact: true }).waitFor();
+    assert.deepEqual(await statuses(), ["pending", "pending", "completed", "empty"]);
+    assert.deepEqual(errors, []);
+  } catch (error) { await shot(page, "completion-sync-failure.png"); throw error; }
+  finally { await browser.close(); }
+});
 
 test("one AI action is selectable across slots, with per-slot duplicates and independent removal", { timeout: 90000 }, async () => {
   const browser = await chromium.launch({ channel: "chrome", headless: true });
