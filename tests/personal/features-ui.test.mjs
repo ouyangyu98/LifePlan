@@ -53,6 +53,7 @@ test("personal features UI with isolated Tauri fixtures", { timeout: 120000 }, a
           return { ...event, category_name: category?.name, category_color: category?.color, action_count: actions.length, completed_action_count: actions.filter((item) => item.status === 1).length, pending_action_count: actions.filter((item) => item.status === 0).length };
         });
         if (cmd === "get_actions") return structuredClone(data.actions);
+        if (cmd === "get_ai_tasks") return [];
         if (cmd === "get_event_categories") return structuredClone(data.categories);
         if (cmd === "create_event_category") {
           if (data.categories.some((item) => item.name === args.payload.name.trim())) throw Error("已经存在同名分类");
@@ -215,7 +216,7 @@ test("insights persistence, recovery and responsive editor", { timeout: 90000 },
       unregisterCallback() {},
       invoke: async (cmd, args = {}) => {
         window.calls.push({ cmd, args });
-        if (cmd === "get_events" || cmd === "get_actions" || cmd === "get_event_categories") return [];
+        if (cmd === "get_events" || cmd === "get_actions" || cmd === "get_event_categories" || cmd === "get_ai_tasks") return [];
         if (cmd === "get_insights_note") {
           if (sessionStorage.getItem("fail-note-load")) throw Error("读取失败");
           return structuredClone(window.note);
@@ -311,6 +312,7 @@ test("daily calendar marks dates used by Today Tasks", { timeout: 60000 }, async
         if (cmd === "get_startup_notice") return null;
         if (cmd === "get_daily_schedule") return { list_date: "2026-09-28", slots: [] };
         if (cmd === "get_actions") return [];
+        if (cmd === "get_ai_tasks") return [];
         if (cmd === "get_daily_used_dates") return ["2026-09-26", "2026-09-28"];
         if (cmd === "plugin:event|listen") return 1;
         return [];

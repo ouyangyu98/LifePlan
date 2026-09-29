@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { AiTask, NewAiTask, UpdateAiTask } from "@/types";
 import type { Action, EventCategory, EventCompletionCheck, RewardCheckin, AddDailyListItem, DailyListItem, DailySchedule, DailyScheduleSlot, DailyTemplateSlot, Event, InsightsNote, NewAction, NewEvent, NewEventCategory, NewDailySlot, NewRecurringAction, ProcessEvent, RecurringAction, ReorderDailyList, ReorderEventActions, ReorderRecurringActions, StartupNotice, UpdateAction, UpdateDailySlot, UpdateDailySlotReview, UpdateEvent, UpdateEventCategory, PomodoroRecord, PomodoroStatus, NewReward, Reward, RewardsOverview, UpdateReward, UpdateRecurringAction } from "@/types";
 
 type TauriWindow = Window & {
@@ -82,6 +83,13 @@ export const dailyScheduleApi = {
   updateReview: (payload: UpdateDailySlotReview) => invokeCommand<DailyScheduleSlot>("update_daily_slot_review", { payload }),
   template: () => invokeCommand<DailyTemplateSlot[]>("get_daily_template"),
   saveTemplate: (slots: DailyTemplateSlot[]) => invokeCommand<DailyTemplateSlot[]>("save_daily_template", { slots }),
+};
+
+export const aiTasksApi = {
+  list: (listDate: string) => invokeCommand<AiTask[]>("get_ai_tasks", { listDate }),
+  create: (payload: NewAiTask) => invokeCommand<AiTask>("create_ai_task", { payload }),
+  update: (payload: UpdateAiTask) => invokeCommand<AiTask>("update_ai_task", { payload }),
+  delete: (id: number, expectedUpdatedAt: number) => invokeCommand<void>("delete_ai_task", { id, expectedUpdatedAt }),
 };
 
 

@@ -1,5 +1,5 @@
 use crate::commands::{
-    actions, analytics, daily_list, daily_schedule, event_categories, events, insights, pomodoro,
+    actions, ai_tasks, analytics, daily_list, daily_schedule, event_categories, events, insights, pomodoro,
     recurring_actions, rewards, system,
 };
 use crate::db::init_db;
@@ -160,6 +160,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            ai_tasks::get_ai_tasks,
+            ai_tasks::create_ai_task,
+            ai_tasks::update_ai_task,
+            ai_tasks::delete_ai_task,
             analytics::record_analytics_event,
             analytics::export_analytics_events,
             events::get_events,

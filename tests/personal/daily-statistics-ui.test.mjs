@@ -53,6 +53,7 @@ test("daily statistics totals, live edits, dates, category errors and responsive
           return structuredClone(events);
         }
         if (cmd === "get_actions") return structuredClone(actions);
+        if (cmd === "get_ai_tasks") return [];
         if (cmd === "get_daily_schedule") {
           if (args.listDate === "2026-09-27") {
             return new Promise((resolve) => { window.resolveOldSchedule = () => resolve({ list_date: args.listDate, slots: [] }); });

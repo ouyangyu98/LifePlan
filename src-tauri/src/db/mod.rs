@@ -142,32 +142,41 @@ pub fn run_migrations(conn: &mut Connection) -> Result<bool, DbError> {
     {
         conn.execute_batch(migrations::INIT_MIGRATION)
             .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
+        conn.execute_batch(migrations::AI_TASKS_MIGRATION)
+            .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
         conn.pragma_update(None, "user_version", migrations::CURRENT_SCHEMA_VERSION)
             .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
         return Ok(true);
     }
     if version == 15 {
         migrate_add_quick_completion_marker(conn)?;
-        return Ok(false);
     }
     if version == 16 {
         migrate_add_personal_features(conn)?;
-        return Ok(false);
     }
     if version == 17 {
         retire_delegation::migrate(conn)?;
-        return Ok(false);
     }
     if version == 13 {
         migrate_remove_projects(conn, true)?;
-        return Ok(false);
     }
     if version == 14 {
         migrate_remove_projects(conn, false)?;
-        return Ok(false);
     }
-    if version == migrations::CURRENT_SCHEMA_VERSION {
+    let upgraded_version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
+    if upgraded_version == 18 {
+        let tx = conn.transaction().map_err(|error| DbError::MigrationFailed(error.to_string()))?;
+        tx.execute_batch(migrations::AI_TASKS_MIGRATION)
+            .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
+        tx.pragma_update(None, "user_version", 19)
+            .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
+        tx.commit().map_err(|error| DbError::MigrationFailed(error.to_string()))?;
+    }
+    if upgraded_version == 18 || upgraded_version == migrations::CURRENT_SCHEMA_VERSION {
         validate_current_schema(conn)?;
+        conn.prepare("SELECT id,space_id,action_id,list_date,title,status,start_time,end_time,notes,result,deleted_at,created_at,updated_at FROM ai_tasks LIMIT 0")
+            .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
         return Ok(false);
     }
     Err(DbError::MigrationFailed(format!(

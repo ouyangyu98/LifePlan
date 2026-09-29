@@ -40,7 +40,7 @@ pub(super) fn migrate(conn: &mut Connection) -> Result<(), DbError> {
         tx.execute_batch("ALTER TABLE actions DROP COLUMN is_delegated_follow_up;")?;
     }
     validate_current_schema(&tx)?;
-    tx.pragma_update(None, "user_version", migrations::CURRENT_SCHEMA_VERSION)?;
+    tx.pragma_update(None, "user_version", 18)?;
     tx.commit()?;
     Ok(())
 }
@@ -132,6 +132,6 @@ mod tests {
             42
         );
         let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, migrations::CURRENT_SCHEMA_VERSION);
+        assert_eq!(version, 18);
     }
 }

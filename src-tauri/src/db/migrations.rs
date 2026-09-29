@@ -1,4 +1,27 @@
-pub const CURRENT_SCHEMA_VERSION: i32 = 18;
+pub const CURRENT_SCHEMA_VERSION: i32 = 19;
+
+pub const AI_TASKS_MIGRATION: &str = r#"
+CREATE TABLE IF NOT EXISTS ai_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    space_id TEXT NOT NULL REFERENCES local_spaces(space_id),
+    action_id INTEGER NOT NULL REFERENCES actions(id) ON DELETE CASCADE,
+    list_date TEXT NOT NULL,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued'
+        CHECK(status IN ('queued','running','paused','ready','completed','failed')),
+    start_time TEXT,
+    end_time TEXT,
+    notes TEXT NOT NULL DEFAULT '',
+    result TEXT NOT NULL DEFAULT '',
+    deleted_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CHECK((start_time IS NULL AND end_time IS NULL)
+       OR (start_time IS NOT NULL AND end_time IS NOT NULL AND start_time < end_time))
+);
+CREATE INDEX IF NOT EXISTS idx_ai_tasks_space_date_action
+    ON ai_tasks(space_id, list_date, action_id, deleted_at, id);
+"#;
 
 pub const INIT_MIGRATION: &str = r#"
 PRAGMA foreign_keys = OFF;

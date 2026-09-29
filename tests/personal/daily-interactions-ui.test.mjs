@@ -36,6 +36,7 @@ test("daily drag moves and swaps reviews atomically; new time slots default to o
       invoke: async (cmd, args = {}) => {
         if (cmd === "get_daily_schedule") return { list_date: args.listDate, slots: structuredClone(slots) };
         if (cmd === "get_actions") return structuredClone(actions);
+        if (cmd === "get_ai_tasks") return [];
         if (cmd === "get_events") return [
           { id: 1, category_id: 10, category_name: "工作", category_color: "#1677ff" },
           { id: 2, category_id: 20, category_name: "成长", category_color: "#389e0d" },

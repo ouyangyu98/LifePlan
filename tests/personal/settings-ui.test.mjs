@@ -29,6 +29,7 @@ test("optional features persist, hide every entry and preserve records", { timeo
       invoke: async (cmd, args = {}) => {
         window.commands.push(cmd);
         if (cmd === "get_actions") return [action];
+        if (cmd === "get_ai_tasks") return [];
         if (cmd === "get_events") return [];
         if (cmd === "get_daily_schedule") return {
           list_date: args.listDate,

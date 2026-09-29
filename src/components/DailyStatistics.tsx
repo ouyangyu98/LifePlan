@@ -3,9 +3,10 @@ import { Alert, Button, Empty, Skeleton, Tooltip } from "antd";
 import { ChartNoAxesCombined, RotateCcw } from "lucide-react";
 import { eventsApi } from "@/lib/api";
 import { formatDuration, summarizeDailySchedule } from "@/lib/dailyStatistics";
-import type { DailyScheduleSlot, Event } from "@/types";
+import { dailyAiSummary } from "@/lib/aiTasks";
+import type { AiTask, DailyScheduleSlot, Event } from "@/types";
 
-export default function DailyStatistics({ date, slots }: { date: string; slots: DailyScheduleSlot[] }) {
+export default function DailyStatistics({ date, slots, aiTasks = [] }: { date: string; slots: DailyScheduleSlot[]; aiTasks?: AiTask[] }) {
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -24,6 +25,7 @@ export default function DailyStatistics({ date, slots }: { date: string; slots: 
     return () => { active = false; };
   }, [date, retry]);
   const stats = useMemo(() => summarizeDailySchedule(slots, events), [slots, events]);
+  const ai = dailyAiSummary(aiTasks, slots);
 
   return <section className="daily-statistics" aria-labelledby="daily-statistics-heading" aria-busy={loading}>
     <header className="daily-statistics-heading">
@@ -60,5 +62,12 @@ export default function DailyStatistics({ date, slots }: { date: string; slots: 
           </>}
         </div>
       </div>}
+    {ai.count > 0 && <div className="daily-ai-statistics" aria-label="AI 任务统计">
+      <span>AI 任务 <strong>{ai.count}</strong> 项</span>
+      <span>已安排时长 <strong>{formatDuration(ai.minutes)}</strong></span>
+      {ai.untimed > 0 && <span>未设时间 {ai.untimed} 项</span>}
+      <span>执行中 <strong>{ai.running}</strong> 项</span>
+      <span>待我确认 <strong>{ai.ready}</strong> 项</span>
+    </div>}
   </section>;
 }

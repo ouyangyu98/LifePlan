@@ -238,6 +238,67 @@ pub struct DailySchedule {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AiTaskStatus {
+    Queued,
+    Running,
+    Paused,
+    Ready,
+    Completed,
+    Failed,
+}
+
+impl AiTaskStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Queued => "queued", Self::Running => "running", Self::Paused => "paused",
+            Self::Ready => "ready", Self::Completed => "completed", Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiTask {
+    pub id: i64,
+    pub action_id: i64,
+    pub list_date: String,
+    pub title: String,
+    pub status: AiTaskStatus,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
+    pub notes: String,
+    pub result: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiTaskFields {
+    pub title: String,
+    pub status: AiTaskStatus,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
+    pub notes: String,
+    pub result: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewAiTask {
+    pub action_id: i64,
+    pub list_date: String,
+    #[serde(flatten)]
+    pub fields: AiTaskFields,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateAiTask {
+    pub id: i64,
+    pub expected_updated_at: i64,
+    #[serde(flatten)]
+    pub fields: AiTaskFields,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewDailySlot {
     pub list_date: String,
     pub start_time: String,

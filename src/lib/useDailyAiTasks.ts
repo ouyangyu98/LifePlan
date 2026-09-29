@@ -1,0 +1,35 @@
+import { useEffect, useState } from "react";
+import { aiTasksApi } from "@/lib/api";
+import { userFacingError } from "@/lib/errors";
+import type { AiTask } from "@/types";
+
+export function useDailyAiTasks(date: string) {
+  const [state, setState] = useState<{ date: string; tasks: AiTask[]; loading: boolean; error: string }>({
+    date, tasks: [], loading: true, error: "",
+  });
+  const [version, setVersion] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setState({ date, tasks: [], loading: true, error: "" });
+    aiTasksApi.list(date).then((tasks) => {
+      if (active) setState({ date, tasks, loading: false, error: "" });
+    }).catch((cause) => {
+      if (active) setState({ date, tasks: [], loading: false, error: userFacingError(cause) });
+    });
+    return () => { active = false; };
+  }, [date, version]);
+  const upsert = (task: AiTask) => setState((current) => current.date !== task.list_date ? current : {
+    ...current, tasks: current.tasks.some((item) => item.id === task.id)
+      ? current.tasks.map((item) => item.id === task.id ? task : item)
+      : [...current.tasks, task],
+  });
+  const remove = (task: AiTask) => setState((current) => current.date !== task.list_date ? current : {
+    ...current, tasks: current.tasks.filter((item) => item.id !== task.id),
+  });
+  return {
+    tasks: state.date === date ? state.tasks : [],
+    loading: state.date !== date || state.loading,
+    error: state.date === date ? state.error : "",
+    retry: () => setVersion((current) => current + 1), upsert, remove,
+  };
+}

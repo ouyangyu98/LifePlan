@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod ai_tasks;
 pub mod analytics;
 pub mod daily_list;
 pub mod daily_schedule;
@@ -15,3 +16,6 @@ mod legacy_priority_tests;
 
 #[cfg(test)]
 mod personal_features_tests;
+
+#[cfg(test)]
+mod ai_tasks_tests;

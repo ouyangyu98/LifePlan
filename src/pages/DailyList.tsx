@@ -2,12 +2,15 @@ import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import dayjs, { type Dayjs } from "dayjs";
 import { Alert, Button, Checkbox, DatePicker, Empty, Form, Input, InputNumber, Modal as AntModal, Popconfirm, Select, Space, Tag, Tooltip, Dropdown, Typography, Radio, message } from "antd";
-import { ArrowRight, CalendarDays, ChevronDown, ChevronUp, FileText, GripVertical, ListChecks, Pencil, Plus, RotateCcw, ListTree, Rows3 } from "lucide-react";
+import { ArrowRight, Bot, CalendarDays, ChevronDown, ChevronUp, FileText, GripVertical, ListChecks, Pencil, Plus, RotateCcw, ListTree, Rows3 } from "lucide-react";
 import { actionsApi, dailyScheduleApi, recurringActionsApi } from "@/lib/api";
-import type { Action, DailySchedule, DailyScheduleSlot, DailyTemplateSlot, NewAction, NewRecurringAction, RecurringAction, UpdateRecurringAction } from "@/types";
+import type { Action, AiTask, DailySchedule, DailyScheduleSlot, DailyTemplateSlot, NewAction, NewRecurringAction, RecurringAction, UpdateRecurringAction } from "@/types";
 import { userFacingError } from "@/lib/errors";
 import WorkLogModal from "@/components/ui/WorkLogModal";
 import DailyStatistics from "@/components/DailyStatistics";
+import DailyAiTaskEditor, { type AiTaskSelection } from "@/components/DailyAiTaskEditor";
+import { aiTaskAnchorSlots, aiTaskStatuses } from "@/lib/aiTasks";
+import { useDailyAiTasks } from "@/lib/useDailyAiTasks";
 import { track } from "@/lib/analytics";
 import { sortDailyActions } from "@/lib/dailyActionSort";
 import { useFeaturePreferences } from "@/lib/featurePreferences";
@@ -34,6 +37,8 @@ const toHalfHourTime = (value: Dayjs) => {
 export default function DailyList() {
   const { features } = useFeaturePreferences();
   const [date, setDate] = useState(today);
+  const ai = useDailyAiTasks(date);
+  const [aiSelection, setAiSelection] = useState<AiTaskSelection | null>(null);
   const [schedule, setSchedule] = useState<DailySchedule | null>(null);
   const [usedDates, setUsedDates] = useState<Set<string>>(() => new Set());
   const [actions, setActions] = useState<Action[]>([]);
@@ -100,18 +105,23 @@ export default function DailyList() {
   return <div className="page daily-list-page">
     <header className="page-header daily-list-header"><div><Typography.Title level={2} className="page-title">今日事</Typography.Title><Typography.Paragraph className="page-subtitle">按时间安排行动，并在右侧独立记录该计划执行情况的复盘。</Typography.Paragraph></div><div className="daily-date-panel">{isToday && <Tag color="blue" className="daily-today-tag">今天</Tag>}<DatePicker value={dayjs(date)} format="YYYY年MM月DD日" allowClear={false} cellRender={(current, info) => { if (info.type !== "date" || !usedDates.has(dayjs(current).format("YYYY-MM-DD"))) return info.originNode; return <div className="daily-date-cell is-used">{info.originNode}<span className="daily-date-used-dot" aria-label="这天使用过今日事" /></div>; }} onChange={(value) => value && setDate(value.format("YYYY-MM-DD"))} /><Typography.Text className="daily-date-context"><span className="daily-weekday-name">{weekdayName}</span></Typography.Text></div></header>
     {error && <Alert className="page-alert" type="error" showIcon message={error} closable onClose={() => setError("")} />}
-    {loading ? <div className="card empty">正在加载…</div> : <>{slots.length === 0 ? <div className="card onboarding-empty"><Empty className="empty" description={<div><Typography.Title level={4}>今天还没有安排行动</Typography.Title><Typography.Paragraph type="secondary">先创建一个时间段，再把要做的行动放进去。</Typography.Paragraph><Space><Button type="primary" icon={<Plus size={15} />} onClick={() => setInsertPreset({})}>新增时间段</Button><Button onClick={() => navigate("/inbox")}>去事件篮记录</Button>{features.templates && <Button onClick={() => void saveTemplate()}>保存空模板</Button>}</Space></div>} /></div> : <ScheduleTable key={date} slots={slots} onPlan={setPickerSlot} onReview={(slot) => { if (!slot.action) { message.warning({ content: "请先安排行动", className: "daily-review-toast" }); return; } setSelectedSlot(slot); }} onEditTime={setTimeSlot} onInsert={prepareInsertedSlot} onMoved={(updated) => setSchedule((current) => current?.list_date === date ? { ...current, slots: current.slots.map((slot) => updated.find((item) => item.id === slot.id) ?? slot) } : current)} />}<div className="daily-template-action"><div className="daily-template-action-left"><Button type="text" icon={<Plus size={15} />} onClick={() => setInsertPreset({})}>新增时间段</Button>{features.templates && <Tooltip title="只影响尚未创建日程的未来日期，不修改已有日期"><Button type="text" icon={<CalendarDays size={15} />} onClick={() => void saveTemplate()}>保存模板</Button></Tooltip>}</div>{features.workLog && <Button type="text" className="work-log-trigger" icon={<FileText size={15} />} disabled={slots.length === 0} onClick={() => setWorkLogOpen(true)}>工作日志</Button>}</div></>}
+    {ai.error && <Alert className="page-alert" type="warning" showIcon message="AI 任务加载失败" description={ai.error} action={<Button size="small" onClick={ai.retry}>重试</Button>} />}
+    {loading ? <div className="card empty">正在加载…</div> : <>{slots.length === 0 ? <div className="card onboarding-empty"><Empty className="empty" description={<div><Typography.Title level={4}>今天还没有安排行动</Typography.Title><Typography.Paragraph type="secondary">先创建一个时间段，再把要做的行动放进去。</Typography.Paragraph><Space><Button type="primary" icon={<Plus size={15} />} onClick={() => setInsertPreset({})}>新增时间段</Button><Button onClick={() => navigate("/inbox")}>去事件篮记录</Button>{features.templates && <Button onClick={() => void saveTemplate()}>保存空模板</Button>}</Space></div>} /></div> : <ScheduleTable key={date} slots={slots} aiTasks={ai.tasks} aiUnavailable={ai.loading || Boolean(ai.error)} onAiTask={(slot, task) => setAiSelection({ slot, task })} onPlan={setPickerSlot} onReview={(slot) => { if (!slot.action) { message.warning({ content: "请先安排行动", className: "daily-review-toast" }); return; } setSelectedSlot(slot); }} onEditTime={setTimeSlot} onInsert={prepareInsertedSlot} onMoved={(updated) => setSchedule((current) => current?.list_date === date ? { ...current, slots: current.slots.map((slot) => updated.find((item) => item.id === slot.id) ?? slot) } : current)} />}<div className="daily-template-action"><div className="daily-template-action-left"><Button type="text" icon={<Plus size={15} />} onClick={() => setInsertPreset({})}>新增时间段</Button>{features.templates && <Tooltip title="只影响尚未创建日程的未来日期，不修改已有日期"><Button type="text" icon={<CalendarDays size={15} />} onClick={() => void saveTemplate()}>保存模板</Button></Tooltip>}</div>{features.workLog && <Button type="text" className="work-log-trigger" icon={<FileText size={15} />} disabled={slots.length === 0} onClick={() => setWorkLogOpen(true)}>工作日志</Button>}</div></>}
     <ActionPickerModal slot={pickerSlot} slots={slots} actions={pendingActions} onGuideToInbox={() => navigate("/inbox", { state: { guideNewEvent: true } })} onClose={() => setPickerSlot(null)} onStartPomodoro={(action) => { const minutes = Math.max(30, Math.ceil((action.estimated_hours || 0.5) * 60 / 30) * 30); sessionStorage.setItem("lifeplan-pomodoro-prefill", JSON.stringify({ actionId: action.id, plannedSeconds: minutes * 60 })); setPickerSlot(null); navigate("/pomodoro"); }} onAssigned={(assignedSlots) => { setSchedule((current) => current ? { ...current, slots: current.slots.map((item) => assignedSlots.find((assigned) => assigned.id === item.id) ?? item) } : current); setPickerSlot(null); }} />
     <DailySlotModal slot={selectedSlot} onClose={() => setSelectedSlot(null)} onSaved={(slot) => { refreshSlot(slot); setSelectedSlot(slot); }} />
     <TimeSlotModal slot={timeSlot} onClose={() => setTimeSlot(null)} onSaved={async () => { setTimeSlot(null); await load(); }} onDeleted={async () => { setTimeSlot(null); await load(); message.success("时间段已删除"); }} />
     <InsertSlotModal date={date} preset={insertPreset} onClose={() => setInsertPreset(null)} onSaved={async () => { setInsertPreset(null); await load(); message.success("已新增时间段"); }} />
-    {!loading && !error && schedule?.list_date === date && features.dailyStatistics && <DailyStatistics key={date} date={date} slots={slots} />}
+    {aiSelection && aiSelection.slot.list_date === date && <DailyAiTaskEditor key={`${date}:${aiSelection.task?.id ?? `new-${aiSelection.slot.id}`}`} selection={aiSelection} onClose={() => setAiSelection(null)} onSaved={ai.upsert} onDeleted={ai.remove} onRefresh={ai.retry} />}
+    {!loading && !error && schedule?.list_date === date && features.dailyStatistics && <DailyStatistics key={date} date={date} slots={slots} aiTasks={ai.tasks} />}
     {features.workLog && workLogOpen && <WorkLogModal date={date} slots={slots} onClose={() => setWorkLogOpen(false)} />}
   </div>;
 }
 
-function ScheduleTable({ slots, onPlan, onReview, onEditTime, onInsert, onMoved }: {
+function ScheduleTable({ slots, aiTasks, aiUnavailable, onAiTask, onPlan, onReview, onEditTime, onInsert, onMoved }: {
   slots: DailyScheduleSlot[];
+  aiTasks: AiTask[];
+  aiUnavailable: boolean;
+  onAiTask: (slot: DailyScheduleSlot, task: AiTask | null) => void;
   onPlan: (slot: DailyScheduleSlot) => void;
   onReview: (slot: DailyScheduleSlot) => void;
   onEditTime: (slot: DailyScheduleSlot) => void;
@@ -122,6 +132,12 @@ function ScheduleTable({ slots, onPlan, onReview, onEditTime, onInsert, onMoved 
   const [targetId, setTargetId] = useState<number | null>(null);
   const [moving, setMoving] = useState(false);
   const busy = useRef(false);
+  const anchors = useMemo(() => aiTaskAnchorSlots(slots), [slots]);
+  const tasksByAction = useMemo(() => {
+    const grouped = new Map<number, AiTask[]>();
+    for (const task of aiTasks) grouped.set(task.action_id, [...(grouped.get(task.action_id) ?? []), task]);
+    return grouped;
+  }, [aiTasks]);
   const clearDrag = () => { setDraggedId(null); setTargetId(null); };
   const move = async (sourceId: number, destinationId: number) => {
     const source = slots.find((slot) => slot.id === sourceId);
@@ -148,8 +164,12 @@ function ScheduleTable({ slots, onPlan, onReview, onEditTime, onInsert, onMoved 
   };
   return <div className={`daily-schedule-card card${moving ? " is-moving" : ""}`} aria-busy={moving}>
     <div className="daily-schedule-head"><div>时间段</div><div>安排行动</div><div>复盘</div></div>
-    <div className="daily-schedule-body">{slots.map((slot, index) => <div className="daily-schedule-row-wrap" key={slot.id}>
-      <div className={`daily-schedule-row${draggedId === slot.id ? " is-dragging" : ""}${targetId === slot.id ? " is-drop-target" : ""}`}
+    <div className="daily-schedule-body">{slots.map((slot, index) => {
+      const tasks = slot.action ? tasksByAction.get(slot.action.id) ?? [] : [];
+      const isAnchor = slot.action && anchors.get(slot.action.id) === slot.id;
+      const expanded = isAnchor && tasks.length > 0;
+      return <div className={`daily-schedule-row-wrap${expanded ? " has-ai-tasks" : ""}`} key={slot.id}>
+      <div className={`daily-schedule-row${expanded ? " has-ai-tasks" : ""}${draggedId === slot.id ? " is-dragging" : ""}${targetId === slot.id ? " is-drop-target" : ""}`}
         onDragOver={(event) => {
           if (draggedId === null || draggedId === slot.id || busy.current) return;
           event.preventDefault();
@@ -171,10 +191,28 @@ function ScheduleTable({ slots, onPlan, onReview, onEditTime, onInsert, onMoved 
           {index < slots.length - 1 && <button className="daily-insert-button" type="button" aria-label="插入时间段" title="插入时间段" disabled={moving}
             onClick={(event) => { event.stopPropagation(); if (!busy.current) onInsert(index); }}><span className="daily-insert-plus"><Plus size={14} /></span></button>}
         </div>
-        <PlanCell slot={slot} disabled={moving} onClick={() => { if (!busy.current) onPlan(slot); }} onDragStart={(event) => startDrag(event, slot)} onDragEnd={clearDrag} />
+        <div className="daily-plan-stack">
+          <div className="daily-plan-main">
+            <PlanCell slot={slot} disabled={moving} onClick={() => { if (!busy.current) onPlan(slot); }} onDragStart={(event) => startDrag(event, slot)} onDragEnd={clearDrag} />
+            {slot.action && <>
+              {!isAnchor && tasks.length > 0 && <Tooltip title="查看该行动当天的 AI 任务"><button type="button" className="daily-ai-count" disabled={moving || aiUnavailable}
+                aria-label={`查看 ${slot.action.title} 的 AI 任务`} onClick={() => document.getElementById(`daily-ai-action-${slot.action!.id}`)?.scrollIntoView({ block: "center", behavior: "smooth" })}>AI {tasks.length}</button></Tooltip>}
+              <Tooltip title="添加 AI 任务"><button type="button" className="daily-ai-add" aria-label={`为 ${slot.action.title} 添加 AI 任务`} disabled={moving || aiUnavailable}
+                onClick={() => { if (!busy.current) onAiTask(slot, null); }}><Bot size={15} /></button></Tooltip>
+            </>}
+          </div>
+          {expanded && <div className="daily-ai-tasks" id={`daily-ai-action-${slot.action!.id}`} aria-label={`${slot.action!.title} 的 AI 任务`}>
+            {tasks.map((task) => <button type="button" className={`daily-ai-task ${task.status}`} key={task.id} disabled={moving || aiUnavailable} onClick={() => onAiTask(slot, task)}>
+              <Bot size={13} aria-hidden="true" />
+              <span className="daily-ai-task-name" title={task.title}>{task.title}</span>
+              {task.start_time && task.end_time && <span className="daily-ai-task-time">{task.start_time}–{task.end_time}</span>}
+              <Tag color={aiTaskStatuses[task.status].color}>{aiTaskStatuses[task.status].label}</Tag>
+            </button>)}
+          </div>}
+        </div>
         <ReviewCell slot={slot} onClick={() => { if (!busy.current) onReview(slot); }} />
       </div>
-    </div>)}</div>
+    </div>; })}</div>
   </div>;
 }
 
