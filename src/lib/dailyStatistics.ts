@@ -21,6 +21,29 @@ export function formatDuration(minutes: number): string {
   return hours ? `${hours} 小时${remainder ? ` ${remainder} 分钟` : ""}` : `${remainder} 分钟`;
 }
 
+export function summarizeDailyReview(slots: readonly DailyScheduleSlot[]) {
+  let plannedMinutes = 0;
+  let reviewedMinutes = 0;
+  let efficientMinutes = 0;
+  for (const slot of slots) {
+    if (!slot.action) continue;
+    const minutes = timeMinutes(slot.end_time) - timeMinutes(slot.start_time);
+    if (!Number.isFinite(minutes) || minutes <= 0) continue;
+    plannedMinutes += minutes;
+    if (!slot.actual_notes?.trim()
+      || ![0, 1].includes(slot.met_expectation as number)
+      || ![0, 1].includes(slot.focused as number)) continue;
+    reviewedMinutes += minutes;
+    if (slot.met_expectation === 1 && slot.focused === 1) efficientMinutes += minutes;
+  }
+  const share = (part: number, total: number) => total ? Math.round(part / total * 1000) / 10 : null;
+  return {
+    plannedMinutes, reviewedMinutes, efficientMinutes,
+    efficientPercentage: share(efficientMinutes, reviewedMinutes),
+    reviewCoverage: share(reviewedMinutes, plannedMinutes),
+  };
+}
+
 export function summarizeDailySchedule(
   slots: readonly DailyScheduleSlot[],
   events: readonly Event[],

@@ -15,9 +15,9 @@ test("AI durations count once per task and never inflate human time", () => {
     { id: 3, slot_id: 3, action_id: 11, start_time: "09:00", end_time: "10:00", status: "running" },
     { id: 4, slot_id: null, action_id: 10, start_time: "09:00", end_time: "10:00", status: "running" },
   ];
-  assert.deepEqual(dailyAiSummary(tasks, slots), { count: 2, minutes: 150, untimed: 1, running: 1, ready: 1 });
+  assert.deepEqual(dailyAiSummary(tasks, slots), { count: 2, minutes: 150, untimed: 1 });
   assert.equal(summarizeDailySchedule(slots, []).totalMinutes, 120);
-  assert.deepEqual(dailyAiSummary([], slots), { count: 0, minutes: 0, untimed: 0, running: 0, ready: 0 });
+  assert.deepEqual(dailyAiSummary([], slots), { count: 0, minutes: 0, untimed: 0 });
 });
 
 test("afternoon attachments stay on the selected occurrence even when times change or are unset", () => {

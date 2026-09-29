@@ -58,7 +58,7 @@ test("website renders real assets, responsive layouts, accessible navigation, ga
       assert.match(await anchor.getAttribute("rel"), /noopener/);
       assert.match(await anchor.getAttribute("href"), /^https:\/\/github\.com\//);
     }
-    assert.equal(await page.locator(".download-card").count(), 3);
+    assert.equal(await page.locator(".download-card").count(), 2);
     for (const card of await page.locator(".download-card").all()) {
       const download = card.locator(".download-button");
       if (requireDownloads) assert.ok(await download.getAttribute("href"), "Every platform must be downloadable");

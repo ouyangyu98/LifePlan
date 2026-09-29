@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatDuration, summarizeDailySchedule } from "../../src/lib/dailyStatistics.ts";
+import { formatDuration, summarizeDailyReview, summarizeDailySchedule } from "../../src/lib/dailyStatistics.ts";
 
 const slot = (start, end, action) => ({ start_time: start, end_time: end, action });
 const events = [
@@ -8,6 +8,21 @@ const events = [
   { id: 2, category_id: 20, category_name: "成长", category_color: "#389e0d" },
   { id: 3, category_id: 10, category_name: "工作", category_color: "#1677ff" },
 ];
+
+test("efficiency uses reviewed duration, with coverage separating unreviewed time", () => {
+  const action = { id: 1 };
+  const review = summarizeDailyReview([
+    { ...slot("09:00", "10:00", action), actual_notes: "done", focused: 1, met_expectation: 1 },
+    { ...slot("10:00", "10:30", action), actual_notes: "interrupted", focused: 0, met_expectation: 1 },
+    { ...slot("10:30", "11:00", action), actual_notes: "partial", focused: 1, met_expectation: 0 },
+    slot("11:00", "13:00", action),
+    { ...slot("13:00", "14:00"), actual_notes: "stale", focused: 1, met_expectation: 1 },
+  ]);
+  assert.deepEqual(review, { plannedMinutes: 240, reviewedMinutes: 120, efficientMinutes: 60, efficientPercentage: 50, reviewCoverage: 50 });
+  assert.equal(summarizeDailyReview([]).efficientPercentage, null);
+  assert.equal(summarizeDailyReview([slot("09:00", "10:00", action)]).reviewCoverage, 0);
+  assert.equal(summarizeDailyReview([{ ...slot("09:00", "10:00", action), focused: 1, met_expectation: 1, actual_notes: " " }]).reviewedMinutes, 0);
+});
 
 test("uses occupied slot duration, not estimates or action completion; repeats count each slot once", () => {
   const action = { id: 1, event_id: 1, estimated_hours: 99, status: 1 };

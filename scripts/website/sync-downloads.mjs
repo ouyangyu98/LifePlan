@@ -16,7 +16,6 @@ if (release.draft || release.prerelease || !release.tag_name || !Array.isArray(r
 const definitions = [
   { id: "mac-arm", name: "macOS", architecture: "Apple Silicon", detail: "适用于 M 系列芯片", extension: "DMG", pattern: /(?:aarch64|arm64).*\.dmg$/i },
   { id: "windows", name: "Windows", architecture: "x64", detail: "适用于 Intel / AMD 64 位电脑", extension: "EXE", pattern: /(?:x64|x86_64).*\.exe$/i },
-  { id: "mac-intel", name: "macOS", architecture: "Intel", detail: "适用于 Intel 芯片 Mac", extension: "DMG", pattern: /(?:x64|x86_64).*\.dmg$/i },
 ];
 const platforms = [];
 for (const { pattern, ...platform } of definitions) {

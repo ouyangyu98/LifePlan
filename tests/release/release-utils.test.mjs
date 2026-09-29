@@ -60,7 +60,7 @@ test("CHANGELOG 在标题后插入新版本且同标签重复运行不重复插�
   assert.equal(upsertChangelog(once, "v1.0.5", entry), once);
 });
 
-test("选择三种安装包和更新元数据", () => {
+test("选择两种安装包和更新元数据", () => {
   const assets = findReleaseAssets([
     { name: "LifePlan_1.0.5_x64-setup.exe" },
     { name: "LifePlan_1.0.5_aarch64.dmg" },
@@ -70,7 +70,7 @@ test("选择三种安装包和更新元数据", () => {
   ]);
   assert.equal(assets.windows.name, "LifePlan_1.0.5_x64-setup.exe");
   assert.equal(assets.macosArm64.name, "LifePlan_1.0.5_aarch64.dmg");
-  assert.equal(assets.macosX64.name, "LifePlan_1.0.5_x86_64.dmg");
+  assert.equal(assets.macosX64, undefined);
 });
 
 test("Release 正文使用实际资产文件名和 CHANGELOG 链接", () => {
@@ -90,14 +90,13 @@ test("Release 正文使用实际资产文件名和 CHANGELOG 链接", () => {
   assert.match(body, /blob\/main\/CHANGELOG\.md/);
 });
 
-test("缺少 macOS Intel 安装包时拒绝发布", () => {
+test("缺少 macOS M 系列安装包时拒绝发布", () => {
   assert.throws(
     () => findReleaseAssets([
       { name: "LifePlan_1.0.5_x64-setup.exe" },
-      { name: "LifePlan_1.0.5_aarch64.dmg" },
       { name: "latest.json" },
     ]),
-    /macOS Intel 安装包应存在且仅存在一个，实际找到 0 个/,
+    /macOS Apple Silicon 安装包应存在且仅存在一个，实际找到 0 个/,
   );
 });
 test("重复安装包时拒绝发布", () => {
@@ -143,9 +142,6 @@ test("汇总脚本生成 latest.json 并去重同名同内容签名", () => {
     writeAsset("mac-arm/LifePlan_1.0.5_aarch64-apple-darwin.dmg", "mac-arm-installer");
     writeAsset("mac-arm/LifePlan_1.0.5_aarch64-apple-darwin.app.tar.gz", "mac-arm-updater");
     writeAsset("mac-arm/LifePlan_1.0.5_aarch64-apple-darwin.app.tar.gz.sig", "mac-arm-signature");
-    writeAsset("mac-x64/LifePlan_1.0.5_x86_64-apple-darwin.dmg", "mac-x64-installer");
-    writeAsset("mac-x64/LifePlan_1.0.5_x86_64-apple-darwin.app.tar.gz", "mac-x64-updater");
-    writeAsset("mac-x64/LifePlan_1.0.5_x86_64-apple-darwin.app.tar.gz.sig", "mac-x64-signature");
 
     execFileSync(process.execPath, [
       "scripts/release/validate-release-assets.mjs",
@@ -159,11 +155,11 @@ test("汇总脚本生成 latest.json 并去重同名同内容签名", () => {
     assert.equal(latest.version, "1.0.5");
     assert.equal(latest.platforms["windows-x86_64"].signature, "windows-signature");
     assert.equal(latest.platforms["darwin-aarch64"].signature, "mac-arm-signature");
-    assert.equal(latest.platforms["darwin-x86_64"].signature, "mac-x64-signature");
+    assert.equal(latest.platforms["darwin-x86_64"], undefined);
     assert.match(readFileSync(bodyFile, "utf8"), /下载 Windows 安装包/);
     assert.equal(readFileSync(join(outputDirectory, "LifePlan_1.0.5_x64-setup.exe.sig"), "utf8"), "windows-signature");
     const checksums = readFileSync(join(outputDirectory, "SHA256SUMS.txt"), "utf8").trim().split("\n");
-    assert.equal(checksums.length, 9);
+    assert.equal(checksums.length, 6);
     for (const line of checksums) {
       const [hash, name] = line.split("  ");
       assert.equal(hash, createHash("sha256").update(readFileSync(join(outputDirectory, name))).digest("hex"));

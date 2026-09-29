@@ -89,6 +89,8 @@ export const aiTasksApi = {
   list: (listDate: string) => invokeCommand<AiTask[]>("get_ai_tasks", { listDate }),
   create: (payload: NewAiTask) => invokeCommand<AiTask>("create_ai_task", { payload }),
   update: (payload: UpdateAiTask) => invokeCommand<AiTask>("update_ai_task", { payload }),
+  replace: (id: number, linkedActionId: number, expectedUpdatedAt: number) =>
+    invokeCommand<AiTask>("replace_ai_task_action", { id, linkedActionId, expectedUpdatedAt }),
   delete: (id: number, expectedUpdatedAt: number) => invokeCommand<void>("delete_ai_task", { id, expectedUpdatedAt }),
 };
 

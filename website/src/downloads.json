@@ -4,7 +4,6 @@
   "releaseUrl": "https://github.com/ouyangyu98/LifePlan/releases",
   "platforms": [
     { "id": "mac-arm", "name": "macOS", "architecture": "Apple Silicon", "detail": "适用于 M 系列芯片", "extension": "DMG", "asset": null },
-    { "id": "windows", "name": "Windows", "architecture": "x64", "detail": "适用于 Intel / AMD 64 位电脑", "extension": "EXE", "asset": null },
-    { "id": "mac-intel", "name": "macOS", "architecture": "Intel", "detail": "适用于 Intel 芯片 Mac", "extension": "DMG", "asset": null }
+    { "id": "windows", "name": "Windows", "architecture": "x64", "detail": "适用于 Intel / AMD 64 位电脑", "extension": "EXE", "asset": null }
   ]
 }

@@ -88,11 +88,6 @@ jobs:
             rust_target: aarch64-apple-darwin
             args: "--target aarch64-apple-darwin --bundles app,dmg"
             artifact_name: release-macos-arm64
-          - platform: macOS Intel
-            runner: macos-15-intel
-            rust_target: x86_64-apple-darwin
-            args: "--target x86_64-apple-darwin --bundles app,dmg"
-            artifact_name: release-macos-x64
     steps:
       - name: 检出标签代码
         uses: actions/checkout@v4
@@ -234,7 +229,7 @@ jobs:
       - name: 下载全部构建资产
         uses: actions/download-artifact@v4
         with:
-          pattern: release-{windows-x64,macos-arm64,macos-x64}
+          pattern: release-{windows-x64,macos-arm64}
           path: downloaded-assets
           merge-multiple: false
 

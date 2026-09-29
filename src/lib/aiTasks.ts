@@ -25,8 +25,6 @@ export function dailyAiSummary(tasks: readonly AiTask[], slots: readonly DailySc
     count: scheduled.length,
     minutes: scheduled.reduce((sum, task) => sum + aiTaskMinutes(task), 0),
     untimed: scheduled.filter((task) => !task.start_time || !task.end_time).length,
-    running: scheduled.filter((task) => task.status === "running").length,
-    ready: scheduled.filter((task) => task.status === "ready").length,
   };
 }
 

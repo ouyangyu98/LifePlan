@@ -40,9 +40,9 @@ Never substitute upstream releases for this edition.
 
 Only add assets after they have been published and verified. Include the exact
 asset URL, byte size and SHA-256 checksum. Keep version and platform metadata
-consistent across all three download options.
+consistent across both download options.
 
-After publishing all three installation packages, update metadata with:
+After publishing both installation packages, update metadata with:
 
 ```sh
 node scripts/website/sync-downloads.mjs
@@ -64,7 +64,7 @@ UI test screenshots go to the ignored `personal.local/website-check` directory.
 Tests cover desktop/mobile overflow, image loading, the first viewport,
 navigation, gallery keyboard interaction, the image dialog, FAQs and downloads.
 Set `WEBSITE_REQUIRE_DOWNLOADS=1` after publication to require working links
-for all three platforms and to check expanded checksums on mobile.
+for both platforms and to check expanded checksums on mobile.
 
 ## Deployment
 

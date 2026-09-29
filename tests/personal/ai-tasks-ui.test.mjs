@@ -70,10 +70,25 @@ async function fixture(page) {
           actions.push(action); save(); return structuredClone(action);
         }
         if (cmd === "assign_daily_slot_action") {
+          if (data.failSave) throw Error("模拟保存失败");
           const slot = slots.find(slot => slot.id === args.slotId);
+          if (slot.action_id !== args.actionId) {
+            data.tasks = data.tasks.filter(task => task.slot_id !== slot.id);
+            for (const key of ["actual_notes", "met_expectation", "focused"]) delete slot[key];
+          }
           slot.action_id = args.actionId;
           slot.action = actions.find(action => action.id === args.actionId);
+          save();
           return structuredClone(slot);
+        }
+        if (cmd === "replace_ai_task_action") {
+          if (data.failSave) throw Error("模拟保存失败");
+          const previous = data.tasks.find(task => task.id === args.id);
+          if (previous.updated_at !== args.expectedUpdatedAt) throw Error("任务已被更新，请关闭后重新打开");
+          const next = { ...previous, id: Math.max(...data.tasks.map(task => task.id)) + 1,
+            linked_action_id: args.linkedActionId, status: "queued", result: "", updated_at: previous.updated_at + 1 };
+          data.tasks = [...data.tasks.filter(task => task.id !== args.id), next];
+          save(); return structuredClone(withSource(next));
         }
         if (cmd === "complete_action" || cmd === "restore_action") {
           const action = actions.find(action => action.id === args.id);
@@ -134,6 +149,12 @@ const shot = async (page, name) => {
   await page.screenshot({ path: path.join(screenshots, name), fullPage: true });
 };
 const drawer = page => page.locator(".daily-ai-editor");
+const openRecords = async page => {
+  const detail = page.getByRole("dialog", { name: /^行动详情/ });
+  await detail.getByRole("button", { name: "更换行动", exact: true }).waitFor();
+  assert.equal(await page.locator(".ant-drawer").count(), 0);
+  await detail.getByRole("button", { name: "任务记录", exact: true }).click();
+};
 const picker = page => page.getByRole("dialog", { name: /^安排行动/ });
 const chooseStatus = async (page, name) => {
   await drawer(page).getByRole("combobox", { name: "任务状态", exact: true }).click();
@@ -188,6 +209,7 @@ test("AI tasks keep idle rows compact, persist, follow actions and do not comple
     await page.reload();
     await page.locator(".daily-ai-task").getByText("整理竞品材料", { exact: true }).waitFor();
     await page.locator(".daily-ai-task").click();
+    await openRecords(page);
     await drawer(page).getByText("整理三个竞品的主要流程", { exact: true }).waitFor();
     await chooseStatus(page, "待我确认");
     await drawer(page).getByRole("textbox", { name: "结果与记录", exact: true }).fill("<script>window.aiResultExecuted=true</script>\n已完成资料整理");
@@ -203,6 +225,7 @@ test("AI tasks keep idle rows compact, persist, follow actions and do not comple
     await openAdd(page, 1);
     await chooseAction(page, "生成一份包含边界情况与例外路径的完整需求分析文档");
     await page.locator(".daily-ai-task").filter({ hasText: "生成一份包含边界情况与例外路径的完整需求分析文档" }).click();
+    await openRecords(page);
     await chooseStatus(page, "执行中");
     await drawer(page).getByRole("combobox", { name: "计划结束时间", exact: true }).click();
     await page.getByRole("option", { name: "11:30", exact: true }).click();
@@ -220,6 +243,7 @@ test("AI tasks keep idle rows compact, persist, follow actions and do not comple
     assert.equal(await page.locator(".daily-schedule-row").nth(1).locator(".daily-ai-task").count(), 1);
     assert.match(await page.locator(".daily-schedule-row").nth(2).textContent(), /需求复盘/);
     await page.locator(".daily-ai-task").first().click();
+    await openRecords(page);
     await shot(page, "ai-detail-desktop.png");
     await drawer(page).getByRole("button", { name: /^取\s*消$/ }).click();
     await drawer(page).waitFor({ state: "hidden" });
@@ -231,11 +255,13 @@ test("AI tasks keep idle rows compact, persist, follow actions and do not comple
     }
     await page.setViewportSize({ width: 1050, height: 850 });
     await page.locator(".daily-ai-task").first().click();
+    await openRecords(page);
     await drawer(page).getByRole("button", { name: "解除挂载", exact: true }).click();
     await page.locator(".ant-popconfirm").getByRole("button", { name: "解除挂载", exact: true }).click();
     await drawer(page).waitFor({ state: "hidden" });
     assert.equal(await page.locator(".daily-ai-task").count(), 1);
     await page.locator(".daily-ai-task").click();
+    await openRecords(page);
     await drawer(page).getByRole("button", { name: "解除挂载", exact: true }).click();
     await page.locator(".ant-popconfirm").getByRole("button", { name: "解除挂载", exact: true }).click();
     await drawer(page).waitFor({ state: "hidden" });
@@ -259,6 +285,7 @@ test("AI editor keeps drafts on failure, validates times, isolates dates and ser
     await openAdd(page);
     await chooseAction(page, "整理竞品材料");
     await page.locator(".daily-ai-task").click();
+    await openRecords(page);
     await drawer(page).getByRole("textbox", { name: "结果与记录", exact: true }).fill("保留草稿");
     await drawer(page).getByRole("combobox", { name: "计划结束时间", exact: true }).click();
     await page.getByRole("option", { name: "08:30", exact: true }).click();
@@ -283,6 +310,7 @@ test("AI editor keeps drafts on failure, validates times, isolates dates and ser
     assert.equal(await page.evaluate(() => window.aiFixture.tasks.length), 1);
     assert.equal(await page.evaluate(() => window.aiFixture.tasks[0].end_time), "24:00");
     await page.locator(".daily-ai-task").click();
+    await openRecords(page);
     await drawer(page).getByRole("textbox", { name: "结果与记录", exact: true }).fill("尚未保存的结果");
     await drawer(page).getByRole("button", { name: /^取\s*消$/ }).click();
     await page.getByRole("button", { name: "放弃修改", exact: true }).click();
@@ -308,9 +336,10 @@ test("AI editor keeps drafts on failure, validates times, isolates dates and ser
     await page.getByRole("button", { name: /^重\s*试$/ }).click();
     await page.locator(".daily-ai-task").getByText("整理竞品材料", { exact: true }).waitFor();
     await page.locator(".daily-ai-task").click();
+    await openRecords(page);
     await page.setViewportSize({ width: 390, height: 844 });
     await shot(page, "ai-detail-mobile.png");
-    assert.equal(await drawer(page).locator(".ant-drawer-body").evaluate(el => el.scrollWidth <= el.clientWidth), true);
+    assert.equal(await drawer(page).locator(".ant-modal-body").evaluate(el => el.scrollWidth <= el.clientWidth), true);
     assert.deepEqual(errors, []);
   } catch (error) { await shot(page, "ai-editor-failure.png"); throw error; }
   finally { await browser.close(); }
@@ -344,6 +373,7 @@ test("AI attachments share pool actions and recover from pool loading failures",
     await page.getByRole("link", { name: "今日事", exact: true }).click();
     await page.locator(".daily-ai-task").getByText("已完成", { exact: true }).waitFor();
     await page.locator(".daily-ai-task").click();
+    await openRecords(page);
     await chooseStatus(page, "等待中");
     await saveTask(page);
     await page.getByRole("link", { name: "事件篮", exact: true }).click();
@@ -358,6 +388,7 @@ test("AI attachments share pool actions and recover from pool loading failures",
     await page.getByRole("link", { name: "今日事", exact: true }).click();
     await page.locator(".daily-ai-task").getByText("事件篮统一改名", { exact: true }).waitFor();
     await page.locator(".daily-ai-task").click();
+    await openRecords(page);
     await drawer(page).getByText("事件篮中的最新说明", { exact: true }).waitFor();
     await page.evaluate(() => { window.aiFixture.failDelete = true; });
     await drawer(page).getByRole("button", { name: "解除挂载", exact: true }).click();
@@ -485,11 +516,13 @@ test("afternoon AI tasks attach to the clicked occurrence across edits reloads a
     await page.reload();
     await expectTaskAt(1);
     await page.locator(".daily-ai-task").click();
+    await openRecords(page);
     await drawer(page).getByRole("combobox", { name: "计划开始时间", exact: true }).click();
     await page.getByRole("option", { name: "11:00", exact: true }).click();
     await saveTask(page);
     await expectTaskAt(1);
     await page.locator(".daily-ai-task").click();
+    await openRecords(page);
     for (const index of [0, 1]) {
       const field = drawer(page).locator(".daily-ai-time-fields .ant-select").nth(index);
       await field.hover();
@@ -512,5 +545,61 @@ test("afternoon AI tasks attach to the clicked occurrence across edits reloads a
     assert.equal(await rows.nth(1).locator(".daily-plan-cell").textContent().then(text => text.includes("准备项目需求")), true);
     await shot(page, "afternoon-ai-moved-row.png");
   } catch (error) { await shot(page, "afternoon-ai-failure.png"); throw error; }
+  finally { await browser.close(); }
+});
+
+test("AI edit shares action details; replacement and removing one occurrence preserve pool actions", { timeout: 90000 }, async () => {
+  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const page = await browser.newPage({ viewport: { width: 1050, height: 850 } });
+  await fixture(page);
+  const details = () => page.getByRole("dialog", { name: /^行动详情/ });
+  try {
+    await page.goto(`${baseUrl}/#/daily-list`);
+    await openAdd(page, 1);
+    await chooseAction(page, "整理竞品材料");
+    await page.locator(".daily-ai-task").click();
+    await details().getByText("整理竞品材料", { exact: true }).waitFor();
+    assert.equal(await page.locator(".ant-drawer").count(), 0);
+    await shot(page, "ai-shared-action-detail.png");
+    await details().getByRole("button", { name: "更换行动", exact: true }).click();
+    await picker(page).getByRole("button", { name: "平铺视图", exact: true }).click();
+    await page.evaluate(() => { window.aiFixture.failSave = true; });
+    await picker(page).locator(".daily-action-picker-item").filter({ hasText: "生成一份包含边界情况与例外路径的完整需求分析文档" }).click();
+    await picker(page).getByText("模拟保存失败", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => window.aiFixture.tasks[0].linked_action_id), 3);
+    await page.evaluate(() => { window.aiFixture.failSave = false; });
+    await chooseAction(page, "生成一份包含边界情况与例外路径的完整需求分析文档");
+    assert.equal(await page.evaluate(() => window.aiFixture.tasks[0].slot_id), 2);
+    assert.equal(await page.locator(".daily-schedule-row").first().locator(".daily-ai-task").count(), 0);
+    const statsText = await page.locator(".daily-statistics").textContent();
+    assert.doesNotMatch(statsText, /执行中|待我确认/);
+    assert.match(statsText, /高效时段占比/);
+    await page.locator(".daily-plan-cell").nth(1).click();
+    await details().getByRole("button", { name: "移出今日事", exact: true }).click();
+    await page.locator(".ant-popconfirm").getByRole("button", { name: /^取\s*消$/ }).click();
+    assert.equal(await page.evaluate(() => window.aiFixture.slots[1].action_id), 1);
+    await page.evaluate(() => { window.aiFixture.failSave = true; });
+    await details().getByRole("button", { name: "移出今日事", exact: true }).click();
+    await page.locator(".ant-popconfirm").getByRole("button", { name: /^移\s*出$/ }).click();
+    await details().getByText("模拟保存失败", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => window.aiFixture.slots[1].action_id), 1);
+    await page.evaluate(() => { window.aiFixture.failSave = false; });
+    await details().getByRole("button", { name: "移出今日事", exact: true }).click();
+    await page.locator(".ant-popconfirm").getByRole("button", { name: /^移\s*出$/ }).click();
+    await details().waitFor({ state: "hidden" });
+    await page.locator(".daily-plan-cell.empty").nth(0).waitFor();
+    assert.equal(await page.evaluate(() => window.aiFixture.slots[0].action_id), 1);
+    assert.equal(await page.evaluate(() => window.aiFixture.actions.length), 6);
+    assert.equal(await page.locator(".daily-ai-task").count(), 0);
+    await page.reload();
+    await page.locator(".daily-plan-cell").nth(1).getByText("+ 点击安排行动", { exact: true }).waitFor();
+    await page.locator(".daily-plan-cell").first().click();
+    await details().getByRole("button", { name: "移出今日事", exact: true }).click();
+    await page.locator(".ant-popconfirm").getByRole("button", { name: /^移\s*出$/ }).click();
+    await details().waitFor({ state: "hidden" });
+    assert.equal(await page.evaluate(() => window.aiFixture.slots[0].actual_notes), undefined);
+    await page.getByLabel("已安排总时长 1 小时", { exact: true }).waitFor();
+    await shot(page, "removed-action-statistics.png");
+  } catch (error) { await shot(page, "shared-edit-removal-failure.png"); throw error; }
   finally { await browser.close(); }
 });

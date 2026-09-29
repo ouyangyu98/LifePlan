@@ -84,11 +84,6 @@ async function createLatestJson(context, files, outputDirectory) {
       description: "macOS Apple Silicon 更新包",
       bundle: chooseUpdaterBundle(files, /(?:aarch64|arm64).*\.app\.tar\.gz$/iu, "macOS Apple Silicon 更新包"),
     },
-    {
-      platform: "darwin-x86_64",
-      description: "macOS Intel 更新包",
-      bundle: chooseUpdaterBundle(files, /(?:x86_64|x64).*\.app\.tar\.gz$/iu, "macOS Intel 更新包"),
-    },
   ];
 
   const platforms = {};
@@ -145,12 +140,10 @@ async function main() {
   const updaterBundles = [
     chooseUpdaterBundle(files, /\.exe$/iu, "Windows 更新包"),
     chooseUpdaterBundle(files, /(?:aarch64|arm64).*\.app\.tar\.gz$/iu, "macOS Apple Silicon 更新包"),
-    chooseUpdaterBundle(files, /(?:x86_64|x64).*\.app\.tar\.gz$/iu, "macOS Intel 更新包"),
   ];
   const outputFiles = [
     assets.windows,
     assets.macosArm64,
-    assets.macosX64,
     latestJson,
     ...updaterBundles,
     ...assets.signatures,

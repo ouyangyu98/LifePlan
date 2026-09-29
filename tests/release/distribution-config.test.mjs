@@ -36,6 +36,7 @@ test("every packaging workflow preserves the independent channel", () => {
     const workflow = read(`.github/workflows/${name}`);
     assert.match(workflow, /LIFEPLAN_ENV: ouyangyu98/);
     assert.match(workflow, /TAURI_SIGNING_PRIVATE_KEY_PASSWORD:/);
+    assert.doesNotMatch(workflow, /rust_target: x86_64-apple-darwin|runner: macos-15-intel/);
   }
   const workflow = read(".github/workflows/release.yml");
   assert.match(workflow, /--tag "\$RELEASE_TAG"/);

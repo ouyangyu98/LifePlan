@@ -419,7 +419,8 @@ pub(super) fn assign_slot_action_impl(
     slot_id: i64,
     action_id: Option<i64>,
 ) -> Result<DailyScheduleSlot, String> {
-    let conn = state.db.lock().map_err(|error| error.to_string())?;
+    let mut connection = state.db.lock().map_err(|error| error.to_string())?;
+    let conn = connection.transaction().map_err(|error| error.to_string())?;
     let space_id = current_space_id(&conn).map_err(|error| error.to_string())?;
     let list_date: String = conn
         .query_row(
@@ -431,15 +432,33 @@ pub(super) fn assign_slot_action_impl(
     if let Some(action_id) = action_id {
         super::actions::validate_schedulable_event(&conn, &space_id, action_id)?;
     }
+    let previous: Option<i64> = conn.query_row(
+        "SELECT action_id FROM daily_schedule_slots WHERE id=?1 AND space_id=?2",
+        params![slot_id, space_id], |row| row.get(0),
+    ).map_err(|error| error.to_string())?;
+    if previous != action_id {
+        conn.execute(
+            "UPDATE ai_tasks SET deleted_at=MAX(?1,updated_at+1),updated_at=MAX(?1,updated_at+1)
+             WHERE space_id=?2 AND slot_id=?3 AND deleted_at IS NULL",
+            params![now_millis(), space_id, slot_id],
+        ).map_err(|error| error.to_string())?;
+        conn.execute(
+            "UPDATE daily_schedule_slots SET actual_notes=NULL,met_expectation=NULL,focused=NULL
+             WHERE id=?1 AND space_id=?2",
+            params![slot_id, space_id],
+        ).map_err(|error| error.to_string())?;
+    }
     let changed = conn.execute("UPDATE daily_schedule_slots SET action_id = ?1, updated_at = ?2 WHERE id = ?3 AND space_id = ?4", params![action_id, now_millis(), slot_id, space_id]).map_err(|error| error.to_string())?;
     if changed == 0 {
         return Err("时间段不存在".into());
     }
-    slot_query(&conn, &list_date)
+    let slot = slot_query(&conn, &list_date)
         .map_err(|error| error.to_string())?
         .into_iter()
         .find(|slot| slot.id == slot_id)
-        .ok_or_else(|| "更新行动后读取失败".into())
+        .ok_or_else(|| "更新行动后读取失败".to_string())?;
+    conn.commit().map_err(|error| error.to_string())?;
+    Ok(slot)
 }
 
 #[tauri::command]

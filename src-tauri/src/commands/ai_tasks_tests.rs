@@ -46,6 +46,49 @@ fn payload() -> NewAiTask {
 }
 
 #[test]
+fn replacing_ai_action_is_atomic_and_keeps_source_progress() {
+    let state = state();
+    let mut request = payload();
+    request.fields.status = AiTaskStatus::Completed;
+    request.fields.result = "Original result".into();
+    let old = ai_tasks::create_task_impl(&state, request).unwrap();
+    assert!(ai_tasks::replace_task_impl(&state, old.id, 999, old.updated_at).is_err());
+    assert!(ai_tasks::replace_task_impl(&state, old.id, 104, old.updated_at - 1).is_err());
+    assert_eq!(ai_tasks::list_tasks(&state.db.lock().unwrap(), "2026-09-29").unwrap().len(), 1);
+    let new = ai_tasks::replace_task_impl(&state, old.id, 104, old.updated_at).unwrap();
+    assert_ne!(new.id, old.id);
+    assert_eq!(new.slot_id, old.slot_id);
+    assert_eq!(new.result, "");
+    let conn = state.db.lock().unwrap();
+    assert_eq!(conn.query_row("SELECT status FROM actions WHERE id=103", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+    assert_eq!(conn.query_row("SELECT result FROM ai_tasks WHERE id=?1", [old.id], |r| r.get::<_, String>(0)).unwrap(), "Original result");
+    assert_eq!(ai_tasks::list_tasks(&conn, "2026-09-29").unwrap().len(), 1);
+}
+
+#[test]
+fn removing_one_slot_clears_review_and_only_its_ai_attachments() {
+    let state = state();
+    ai_tasks::create_task_impl(&state, payload()).unwrap();
+    let mut second = payload(); second.slot_id = 202; second.linked_action_id = 104;
+    let other = ai_tasks::create_task_impl(&state, second).unwrap();
+    let unchanged = daily_schedule::assign_slot_action_impl(&state, 201, Some(101)).unwrap();
+    assert_eq!(unchanged.actual_notes.as_deref(), Some("Keep review"));
+    let cleared = daily_schedule::assign_slot_action_impl(&state, 201, None).unwrap();
+    assert!(cleared.action_id.is_none());
+    assert!(cleared.actual_notes.is_none());
+    assert!(cleared.met_expectation.is_none());
+    assert!(cleared.focused.is_none());
+    assert_eq!(cleared.start_time, "09:00");
+    let restored = daily_schedule::assign_slot_action_impl(&state, 201, Some(101)).unwrap();
+    assert!(restored.actual_notes.is_none());
+    let conn = state.db.lock().unwrap();
+    let remaining = ai_tasks::list_tasks(&conn, "2026-09-29").unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].id, other.id);
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM actions WHERE deleted_at IS NULL", [], |r| r.get::<_, i64>(0)).unwrap(), 4);
+}
+
+#[test]
 fn ai_crud_preserves_parent_review_and_supports_all_manual_states() {
     let state = state();
     let before = serde_json::to_value(daily_schedule::slot_query(&state.db.lock().unwrap(), "2026-09-29").unwrap()).unwrap();

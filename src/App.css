@@ -73,6 +73,14 @@ body.pomodoro-floating-mode .app-shell { padding-top: 0; }
 .daily-statistics-heading h3 svg { color: #617180; }
 .daily-statistics-heading time { color: #7a8591; font-size: 12px; font-variant-numeric: tabular-nums; }
 .daily-statistics-content { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 32px; align-items: start; }
+.daily-review-statistics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; border-top: 1px solid #dfe5eb; margin-top: 22px; padding-top: 20px; }
+.daily-review-metric { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.daily-review-metric > div:last-child { display: flex; flex-direction: column; gap: 5px; min-width: 0; font-size: 12px; color: #657180; }
+.daily-review-metric strong { color: #253342; font-size: 18px; font-weight: 600; }
+.daily-review-metric-label { display: flex; align-items: center; gap: 6px; color: #52606e; }
+.daily-review-metric .ant-progress { flex: 0 0 70px; }
+.daily-action-detail-footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+@media (max-width: 620px) { .daily-review-statistics { grid-template-columns: minmax(0, 1fr); } }
 .daily-statistics-total { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 0 24px 0 0; border-right: 1px solid #dfe5eb; color: #657180; font-size: 12px; }
 .daily-statistics-total > span:first-child { color: #52606e; font-size: 13px; }
 .daily-statistics-total strong { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: 7px; color: #253342; font-size: 30px; line-height: 1.35; font-weight: 600; font-variant-numeric: tabular-nums; }

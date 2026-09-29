@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Empty, Skeleton, Tooltip } from "antd";
-import { ChartNoAxesCombined, RotateCcw } from "lucide-react";
+import { Alert, Button, Empty, Progress, Skeleton, Tooltip } from "antd";
+import { ChartNoAxesCombined, Info, RotateCcw } from "lucide-react";
 import { eventsApi } from "@/lib/api";
-import { formatDuration, summarizeDailySchedule } from "@/lib/dailyStatistics";
+import { formatDuration, summarizeDailyReview, summarizeDailySchedule } from "@/lib/dailyStatistics";
 import { dailyAiSummary } from "@/lib/aiTasks";
 import type { AiTask, DailyScheduleSlot, Event } from "@/types";
 
@@ -25,6 +25,7 @@ export default function DailyStatistics({ date, slots, aiTasks = [] }: { date: s
     return () => { active = false; };
   }, [date, retry]);
   const stats = useMemo(() => summarizeDailySchedule(slots, events), [slots, events]);
+  const review = useMemo(() => summarizeDailyReview(slots), [slots]);
   const ai = dailyAiSummary(aiTasks, slots);
 
   return <section className="daily-statistics" aria-labelledby="daily-statistics-heading" aria-busy={loading}>
@@ -62,12 +63,30 @@ export default function DailyStatistics({ date, slots, aiTasks = [] }: { date: s
           </>}
         </div>
       </div>}
+    <div className="daily-review-statistics" aria-label="复盘效率统计">
+      <div className="daily-review-metric">
+        <Progress type="circle" size={70} strokeWidth={7} strokeColor="#16846c"
+          percent={review.efficientPercentage ?? 0} status="normal"
+          format={() => review.efficientPercentage === null ? "--" : `${review.efficientPercentage}%`} />
+        <div><span className="daily-review-metric-label">高效时段占比<Tooltip title="已复盘中，同时标记为专注且达到预期的时间段占比；按时间段时长计算，不含并行 AI 时长。"><Info size={13} tabIndex={0} aria-label="高效时段占比口径" /></Tooltip></span>
+          <strong>{review.reviewedMinutes ? formatDuration(review.efficientMinutes) : "暂无复盘"}</strong>
+          <span>已复盘 {formatDuration(review.reviewedMinutes)}</span>
+        </div>
+      </div>
+      <div className="daily-review-metric">
+        <Progress type="circle" size={70} strokeWidth={7} strokeColor="#437ec4"
+          percent={review.reviewCoverage ?? 0} status="normal"
+          format={() => review.reviewCoverage === null ? "--" : `${review.reviewCoverage}%`} />
+        <div><span className="daily-review-metric-label">复盘覆盖率<Tooltip title="已完整填写复盘的时长占已安排时长的比例。尚未复盘的时间不会被判为低效。"><Info size={13} tabIndex={0} aria-label="复盘覆盖率口径" /></Tooltip></span>
+          <strong>{formatDuration(review.reviewedMinutes)}</strong>
+          <span>未复盘 {formatDuration(review.plannedMinutes - review.reviewedMinutes)}</span>
+        </div>
+      </div>
+    </div>
     {ai.count > 0 && <div className="daily-ai-statistics" aria-label="AI 任务统计">
       <span>AI 任务 <strong>{ai.count}</strong> 项</span>
       <span>已安排时长 <strong>{formatDuration(ai.minutes)}</strong></span>
       {ai.untimed > 0 && <span>未设时间 {ai.untimed} 项</span>}
-      <span>执行中 <strong>{ai.running}</strong> 项</span>
-      <span>待我确认 <strong>{ai.ready}</strong> 项</span>
     </div>}
   </section>;
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Drawer, Form, Input, Modal, Popconfirm, Select, Space, Typography } from "antd";
+import { Alert, Button, Form, Input, Modal, Popconfirm, Select, Space, Typography } from "antd";
 import { Bot, Check, ListTree, Save, Unlink } from "lucide-react";
 import { aiTasksApi } from "@/lib/api";
 import { aiTaskStatuses } from "@/lib/aiTasks";
@@ -73,8 +73,8 @@ export default function DailyAiTaskEditor({ selection, onClose, onSaved, onDelet
     } catch (cause) { setError(userFacingError(cause)); onRefresh(); }
     finally { busy.current = false; setSaving(false); }
   };
-  return <Drawer open title={<span className="daily-ai-editor-title"><Bot size={18} />AI 任务详情</span>}
-    width={460} onClose={close} maskClosable={!saving} keyboard={!saving}
+  return <Modal open title={<span className="daily-ai-editor-title"><Bot size={18} />AI 任务记录</span>}
+    width={540} onCancel={close} maskClosable={!saving} keyboard={!saving} closable={!saving}
     className="daily-ai-editor"
     footer={<div className="daily-ai-editor-footer">
       <Popconfirm title="解除这个 AI 任务的挂载？" description="行动及其完成状态会保留。" okText="解除挂载" cancelText="取消" onConfirm={() => void remove()} disabled={saving}>
@@ -110,5 +110,5 @@ export default function DailyAiTaskEditor({ selection, onClose, onSaved, onDelet
       </div>
       <Form.Item name="result" label="结果与记录" rules={[{ max: 20000, message: "最多 20000 个字" }]}><Input.TextArea autoSize={{ minRows: 4, maxRows: 12 }} maxLength={20000} /></Form.Item>
     </Form>
-  </Drawer>;
+  </Modal>;
 }

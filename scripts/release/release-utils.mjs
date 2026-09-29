@@ -124,7 +124,6 @@ export function findReleaseAssets(files) {
   return {
     windows: choose(/\.exe$/iu, "Windows 安装包"),
     macosArm64: choose(/(?:aarch64|arm64).*(?:\.dmg|\.zip)$/iu, "macOS Apple Silicon 安装包"),
-    macosX64: choose(/(?:x86_64|x64).*(?:\.dmg|\.zip)$/iu, "macOS Intel 安装包"),
     latestJson: choose(/^latest\.json$/iu, "latest.json"),
     signatures: files.filter(({ name }) => /\.sig$/iu.test(name)),
   };
@@ -147,9 +146,9 @@ export function renderReleaseBody({ tag, sections, repository, defaultBranch, as
     "| --- | --- | --- |",
     `| Windows | x64 | [下载 Windows 安装包](${assetUrl(assets.windows.name)}) |`,
     `| macOS | Apple Silicon（M 系列芯片） | [下载 ARM64 安装包](${assetUrl(assets.macosArm64.name)}) |`,
-    `| macOS | Intel 芯片 | [下载 x64 安装包](${assetUrl(assets.macosX64.name)}) |`,
     "",
     "> Windows 请下载 `.exe` 安装包；macOS 请根据芯片类型下载对应的安装包。",
+    "> 仅支持 Windows x64 和 Mac M 系列；不提供 Mac Intel 安装包。",
     "",
     "## 安装与数据说明",
     "",

@@ -163,6 +163,7 @@ pub fn run() {
             ai_tasks::get_ai_tasks,
             ai_tasks::create_ai_task,
             ai_tasks::update_ai_task,
+            ai_tasks::replace_ai_task_action,
             ai_tasks::delete_ai_task,
             analytics::record_analytics_event,
             analytics::export_analytics_events,

@@ -27,8 +27,8 @@ test("daily statistics totals, live edits, dates, category errors and responsive
       { id: 4, event_id: 2, title: "学习实践", status: 0, estimated_hours: 0.5 },
     ];
     const events = [
-      { id: 1, category_id: 10, category_name: "工作", category_color: "#1677ff" },
-      { id: 2, category_id: 20, category_name: "成长", category_color: "#389e0d" },
+      { id: 1, status: 1, category_id: 10, category_name: "工作", category_color: "#1677ff" },
+      { id: 2, status: 1, category_id: 20, category_name: "成长", category_color: "#389e0d" },
     ];
     const makeSlot = (id, start, end, action) => ({
       id, list_date: "2026-09-28", start_time: start, end_time: end,
@@ -41,6 +41,8 @@ test("daily statistics totals, live edits, dates, category errors and responsive
       makeSlot(4, "13:00", "14:00", actions[2]),
       makeSlot(5, "14:00", "14:30"),
     ];
+    Object.assign(slots[0], { actual_notes: "完成项目推进", focused: 1, met_expectation: 1 });
+    Object.assign(slots[1], { actual_notes: "遇到阻碍", focused: 1, met_expectation: 0 });
     window.statsFixture = { slots, actions, events, failEvents: false };
     window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
     window.__TAURI_INTERNALS__ = {
@@ -98,6 +100,8 @@ test("daily statistics totals, live edits, dates, category errors and responsive
   try {
     await page.goto(`${baseUrl}/#/daily-list`);
     await total("4 小时");
+    await region.getByText("75%", { exact: true }).waitFor();
+    await region.locator(".daily-review-statistics").getByText("50%", { exact: true }).waitFor();
     const rows = region.locator("tbody tr");
     assert.deepEqual(await rows.allTextContents(), ["工作2 小时50%", "成长1 小时25%", "未分类1 小时25%"]);
     assert.deepEqual(await region.locator(".daily-statistics-bar > span").evaluateAll((els) => els.map((el) => el.style.width)), ["50%", "25%", "25%"]);

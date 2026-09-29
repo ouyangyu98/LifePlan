@@ -109,13 +109,19 @@ pub fn create_ai_task(state: State<'_, AppState>, payload: NewAiTask) -> Result<
 }
 
 pub(super) fn create_task_impl(state: &AppState, payload: NewAiTask) -> Result<AiTask, String> {
+    let mut conn = state.db.lock().map_err(|error| error.to_string())?;
+    let tx = conn.transaction().map_err(|error| error.to_string())?;
+    let task = insert_task(&tx, payload)?;
+    tx.commit().map_err(|error| error.to_string())?;
+    Ok(task)
+}
+
+fn insert_task(tx: &Connection, payload: NewAiTask) -> Result<AiTask, String> {
     validate_date(&payload.list_date)?;
     validate_fields(&payload.fields)?;
     if payload.action_id == payload.linked_action_id {
         return Err("不能将主行动挂载到自身".into());
     }
-    let mut conn = state.db.lock().map_err(|error| error.to_string())?;
-    let tx = conn.transaction().map_err(|error| error.to_string())?;
     let space = current_space_id(&tx).map_err(|error| error.to_string())?;
     super::actions::validate_schedulable_event(&tx, &space, payload.action_id)?;
     let scheduled: bool = tx.query_row(
@@ -150,6 +156,36 @@ pub(super) fn create_task_impl(state: &AppState, payload: NewAiTask) -> Result<A
     let id = tx.last_insert_rowid();
     sync_completion(&tx, &space, payload.linked_action_id, &f.status, now)?;
     let task = read_task(&tx, &space, id)?;
+    Ok(task)
+}
+
+#[tauri::command]
+pub fn replace_ai_task_action(
+    state: State<'_, AppState>, id: i64, linked_action_id: i64, expected_updated_at: i64,
+) -> Result<AiTask, String> {
+    replace_task_impl(&state, id, linked_action_id, expected_updated_at)
+}
+
+pub(super) fn replace_task_impl(
+    state: &AppState, id: i64, linked_action_id: i64, expected_updated_at: i64,
+) -> Result<AiTask, String> {
+    let mut conn = state.db.lock().map_err(|error| error.to_string())?;
+    let tx = conn.transaction().map_err(|error| error.to_string())?;
+    let space = current_space_id(&tx).map_err(|error| error.to_string())?;
+    let old = read_task(&tx, &space, id)?;
+    if old.updated_at != expected_updated_at { return Err("任务已被更新，请关闭后重新打开".into()); }
+    if old.read_only { return Err("所属事件已完成或放弃，请先恢复后再修改".into()); }
+    if old.linked_action_id == linked_action_id { return Ok(old); }
+    let slot_id = old.slot_id.ok_or("该挂载已移出今日事，请刷新后重试")?;
+    let task = insert_task(&tx, NewAiTask {
+        slot_id, action_id: old.action_id, linked_action_id, list_date: old.list_date,
+        fields: AiTaskFields {
+            status: AiTaskStatus::Queued, start_time: old.start_time,
+            end_time: old.end_time, result: String::new(),
+        },
+    })?;
+    tx.execute("UPDATE ai_tasks SET deleted_at=?1,updated_at=?1 WHERE id=?2 AND space_id=?3",
+        params![now_millis().max(old.updated_at + 1), id, space]).map_err(|error| error.to_string())?;
     tx.commit().map_err(|error| error.to_string())?;
     Ok(task)
 }
