@@ -22,6 +22,8 @@ release process. Back up data before any future manual transfer.
    tauri.conf.json identical.
 2. Run `npm run test:release`, `npm run build` and the Rust channel tests.
 3. Push the reviewed commit and a matching `vX.Y.Z` tag.
+   If the tag event does not start a run, dispatch the release workflow from
+   `main` with that existing tag. Do not move or overwrite a version tag.
 4. The release workflow builds Windows x64, macOS Apple Silicon and macOS Intel.
 5. All three builds must finish before a draft release is created. Assets,
    updater signatures, latest.json and SHA256SUMS.txt are uploaded before the
