@@ -37,7 +37,7 @@ const toHalfHourTime = (value: Dayjs) => {
 export default function DailyList() {
   const { features } = useFeaturePreferences();
   const [date, setDate] = useState(today);
-  const ai = useDailyAiTasks(date);
+  const ai = useDailyAiTasks(date, features.aiParallel);
   const [aiSelection, setAiSelection] = useState<AiTaskSelection | null>(null);
   const [aiRecordSelection, setAiRecordSelection] = useState<AiTaskSelection | null>(null);
   const [aiPickerSlot, setAiPickerSlot] = useState<DailyScheduleSlot | null>(null);
@@ -68,7 +68,7 @@ export default function DailyList() {
     }
   };
   useEffect(() => { void load(); return () => { loadVersion.current += 1; }; }, [date]);
-  useEffect(() => { setAiSelection(null); setAiRecordSelection(null); setAiPickerSlot(null); setPickerSlot(null); }, [date]);
+  useEffect(() => { setAiSelection(null); setAiRecordSelection(null); setAiPickerSlot(null); setPickerSlot(null); }, [date, features.aiParallel]);
   useEffect(() => {
     const reviewActionId = (location.state as { reviewActionId?: number } | null)?.reviewActionId;
     if (!reviewActionId || loading || !schedule || date !== today()) return;
@@ -81,6 +81,7 @@ export default function DailyList() {
   const isToday = date === today();
   const refreshSlot = (slot: DailyScheduleSlot) => setSchedule((current) => current ? { ...current, slots: current.slots.map((item) => item.id === slot.id ? slot : item) } : current);
   const attachAiAction = async (action: Action) => {
+    if (!features.aiParallel) return;
     if (aiSelection) {
       const updated = await aiTasksApi.replace(aiSelection.task.id, action.id, aiSelection.task.updated_at);
       ai.remove(aiSelection.task);
@@ -112,8 +113,9 @@ export default function DailyList() {
     }
     message.success("已移出今日事，行动保留在事件篮");
   };
-  const activePickerSlot = aiSelection?.slot ?? aiPickerSlot ?? pickerSlot;
-  const aiParentId = (aiSelection?.slot ?? aiPickerSlot)?.action?.id;
+  const aiAttachmentSlot = features.aiParallel ? aiSelection?.slot ?? aiPickerSlot : null;
+  const activePickerSlot = aiAttachmentSlot ?? pickerSlot;
+  const aiParentId = aiAttachmentSlot?.action?.id;
   const moveScheduleContent = (updated: DailyScheduleSlot[], source: DailyScheduleSlot, target: DailyScheduleSlot) => {
     ai.moveWithSlots(source, target);
     setSchedule(current => current?.list_date === date
@@ -153,7 +155,7 @@ export default function DailyList() {
       onRemove={removeAction}
       onOpenAiRecords={() => { setAiRecordSelection(aiSelection); setAiSelection(null); }}
       onPickAction={aiPickerSlot || aiSelection ? attachAiAction : undefined}
-      excludedActionIds={aiParentId ? [aiParentId, ...ai.tasks.filter(task => task.action_id === aiParentId && task.id !== aiSelection?.task.id).map(task => task.linked_action_id)] : []}
+      excludedActionIds={aiParentId ? [aiParentId, ...ai.tasks.filter(task => task.slot_id === aiAttachmentSlot?.id && task.action_id === aiParentId && task.id !== aiSelection?.task.id).map(task => task.linked_action_id)] : []}
       onGuideToInbox={() => navigate("/inbox", { state: { guideNewEvent: true } })}
       onClose={() => { setPickerSlot(null); setAiPickerSlot(null); setAiSelection(null); }}
       onStartPomodoro={(action) => { const minutes = Math.max(30, Math.ceil((action.estimated_hours || 0.5) * 60 / 30) * 30); sessionStorage.setItem("lifeplan-pomodoro-prefill", JSON.stringify({ actionId: action.id, plannedSeconds: minutes * 60 })); setPickerSlot(null); navigate("/pomodoro"); }}
@@ -161,7 +163,7 @@ export default function DailyList() {
     <DailySlotModal slot={selectedSlot} onClose={() => setSelectedSlot(null)} onSaved={(slot) => { refreshSlot(slot); setSelectedSlot(slot); }} />
     <TimeSlotModal slot={timeSlot} onClose={() => setTimeSlot(null)} onSaved={async () => { setTimeSlot(null); await load(); }} onDeleted={async () => { setTimeSlot(null); await load(); message.success("时间段已删除"); }} />
     <InsertSlotModal date={date} preset={insertPreset} onClose={() => setInsertPreset(null)} onSaved={async () => { setInsertPreset(null); await load(); message.success("已新增时间段"); }} />
-    {aiRecordSelection && aiRecordSelection.slot.list_date === date && <DailyAiTaskEditor key={`${date}:${aiRecordSelection.task.id}`} selection={aiRecordSelection} onClose={() => setAiRecordSelection(null)} onSaved={(task) => { ai.upsert(task); ai.retry(); void load(); }} onDeleted={ai.remove} onRefresh={ai.retry} onOpenInbox={() => { setAiRecordSelection(null); navigate("/inbox"); }} />}
+    {features.aiParallel && aiRecordSelection && aiRecordSelection.slot.list_date === date && <DailyAiTaskEditor key={`${date}:${aiRecordSelection.task.id}`} selection={aiRecordSelection} onClose={() => setAiRecordSelection(null)} onSaved={(task) => { ai.upsert(task); ai.retry(); void load(); }} onDeleted={ai.remove} onRefresh={ai.retry} onOpenInbox={() => { setAiRecordSelection(null); navigate("/inbox"); }} />}
     {!loading && !error && schedule?.list_date === date && features.dailyStatistics && <DailyStatistics key={date} date={date} slots={slots} aiTasks={ai.tasks} />}
     {features.workLog && workLogOpen && <WorkLogModal date={date} slots={slots} onClose={() => setWorkLogOpen(false)} />}
   </div>;
@@ -178,6 +180,7 @@ function ScheduleTable({ slots, aiTasks, aiUnavailable, onAiTask, onPlan, onRevi
   onInsert: (index: number) => void;
   onMoved: (slots: DailyScheduleSlot[], source: DailyScheduleSlot, target: DailyScheduleSlot) => void;
 }) {
+  const { features } = useFeaturePreferences();
   const [draggedId, setDraggedId] = useState<number | null>(null);
   const [targetId, setTargetId] = useState<number | null>(null);
   const [moving, setMoving] = useState(false);
@@ -212,7 +215,7 @@ function ScheduleTable({ slots, aiTasks, aiUnavailable, onAiTask, onPlan, onRevi
     <div className="daily-schedule-head"><div>时间段</div><div>安排行动</div><div>复盘</div></div>
     <div className="daily-schedule-body">{slots.map((slot, index) => {
       const tasks = tasksBySlot.get(slot.id) ?? [];
-      const expanded = tasks.length > 0;
+      const expanded = features.aiParallel && tasks.length > 0;
       return <div className={`daily-schedule-row-wrap${expanded ? " has-ai-tasks" : ""}`} key={slot.id}>
       <div className={`daily-schedule-row${expanded ? " has-ai-tasks" : ""}${draggedId === slot.id ? " is-dragging" : ""}${targetId === slot.id ? " is-drop-target" : ""}`}
         onDragOver={(event) => {
@@ -239,7 +242,7 @@ function ScheduleTable({ slots, aiTasks, aiUnavailable, onAiTask, onPlan, onRevi
         <div className="daily-plan-stack">
           <div className="daily-plan-main">
             <PlanCell slot={slot} disabled={moving} onClick={() => { if (!busy.current) onPlan(slot); }} onDragStart={(event) => startDrag(event, slot)} onDragEnd={clearDrag} />
-            {slot.action && <>
+            {features.aiParallel && slot.action && <>
               <Tooltip title="添加 AI 任务"><button type="button" className="daily-ai-add" aria-label={`为 ${slot.action.title} 添加 AI 任务`} disabled={moving || aiUnavailable}
                 onClick={() => { if (!busy.current) onAiTask(slot, null); }}><Bot size={15} /></button></Tooltip>
             </>}
@@ -462,7 +465,9 @@ function ActionPickerModal({ slot, slots, aiTask, hasAiTasks, onRemove, onOpenAi
       await pickAiAction(async () => action); return;
     }
     if (slot.action_id !== action.id && (slot.actual_notes || slot.met_expectation != null || slot.focused != null || hasAiTasks)
-      && !await confirmChange("会清空当前时间段的复盘并解除 AI 挂载，事件篮中的行动和完成状态保留。")) return;
+      && !await confirmChange(features.aiParallel
+        ? "会清空当前时间段的复盘并解除 AI 挂载，事件篮中的行动和完成状态保留。"
+        : "会清空当前时间段的复盘及关联安排，事件篮中的行动和完成状态保留。")) return;
     const currentIndex = slots.findIndex((item) => item.id === slot.id);
     const previousAssigned = slots.slice(0, currentIndex).some((item) => item.action_id === action.id);
     const currentMinutes = minutesBetween(slot.start_time, slot.end_time);
@@ -577,7 +582,7 @@ function ActionPickerModal({ slot, slots, aiTask, hasAiTasks, onRemove, onOpenAi
     {displayedAction ? <ActionPreview action={displayedAction} /> : poolLoading ? <Typography.Paragraph type="secondary">正在加载…</Typography.Paragraph> :
       <Alert type="warning" showIcon message={poolError || "行动信息已变化，请刷新后重试"} action={<Button size="small" onClick={() => setPoolRetry(value => value + 1)}>重试</Button>} />}
     <div className="form-footer daily-action-detail-footer">
-      <Popconfirm title="移出这个行动？" description={aiTask ? "仅解除这次 AI 挂载，原行动和完成状态保留。" : "保留时间段和事件篮中的行动，清空该时间段复盘并解除 AI 挂载。"} okText="移出" cancelText="取消" onConfirm={remove} disabled={saving}>
+      <Popconfirm title="移出这个行动？" description={aiTask ? "仅解除这次 AI 挂载，原行动和完成状态保留。" : features.aiParallel ? "保留时间段和事件篮中的行动，清空该时间段复盘并解除 AI 挂载。" : "保留时间段和事件篮中的行动，清空该时间段的复盘及关联安排。"} okText="移出" cancelText="取消" onConfirm={remove} disabled={saving}>
         <Button icon={<Unlink size={14} />} danger disabled={saving}>移出今日事</Button>
       </Popconfirm>
       <Space wrap><Button disabled={saving || Boolean(aiTask?.read_only)} onClick={() => setViewing(false)}>更换行动</Button>

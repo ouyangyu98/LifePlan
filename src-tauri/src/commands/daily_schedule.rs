@@ -510,15 +510,31 @@ pub(super) fn move_slot_action_impl(
             return Err("时间段已发生变化，请刷新后重试".into());
         }
     }
-    // Keep attachments with the moved occurrence, not another row of the same action.
-    tx.execute(
-        "UPDATE ai_tasks
-         SET slot_id=CASE WHEN slot_id=?1 THEN ?2 ELSE ?1 END,
-             updated_at=MAX(updated_at+1,?3)
-         WHERE space_id=?4 AND list_date=?5 AND deleted_at IS NULL
-           AND ((slot_id=?1 AND action_id=?6) OR (slot_id=?2 AND action_id=?7))",
-        params![source_slot_id, target_slot_id, timestamp, space_id, list_date, source.action_id, target.action_id],
-    ).map_err(|error| error.to_string())?;
+    let attachments = {
+        let mut statement = tx.prepare(
+            "SELECT id,slot_id FROM ai_tasks
+             WHERE space_id=?1 AND list_date=?2 AND deleted_at IS NULL
+               AND ((slot_id=?3 AND action_id=?4) OR (slot_id=?5 AND action_id=?6))",
+        ).map_err(|error| error.to_string())?;
+        let rows = statement.query_map(
+            params![space_id, list_date, source_slot_id, source.action_id, target_slot_id, target.action_id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        ).map_err(|error| error.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?
+    };
+    // Vacate both locations inside the transaction to avoid transient unique-index
+    // collisions when both occurrences have the same linked action.
+    for (id, _) in &attachments {
+        tx.execute("UPDATE ai_tasks SET slot_id=NULL WHERE id=?1", [id])
+            .map_err(|error| error.to_string())?;
+    }
+    for (id, old_slot) in attachments {
+        let destination = if old_slot == source_slot_id { target_slot_id } else { source_slot_id };
+        tx.execute(
+            "UPDATE ai_tasks SET slot_id=?1,updated_at=MAX(updated_at+1,?2) WHERE id=?3",
+            params![destination, timestamp, id],
+        ).map_err(|error| error.to_string())?;
+    }
     let updated = slot_query(&tx, list_date).map_err(|error| error.to_string())?
         .into_iter().filter(|slot| slot.id == source_slot_id || slot.id == target_slot_id).collect();
     tx.commit().map_err(|error| error.to_string())?;

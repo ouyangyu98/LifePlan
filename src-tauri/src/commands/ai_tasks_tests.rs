@@ -46,6 +46,107 @@ fn payload() -> NewAiTask {
 }
 
 #[test]
+fn same_ai_action_can_attach_to_multiple_slots_but_not_twice_in_one_slot() {
+    let state = state();
+    let first = ai_tasks::create_task_impl(&state, payload()).unwrap();
+    let mut second = payload(); second.slot_id = 202;
+    let second = ai_tasks::create_task_impl(&state, second).unwrap();
+    assert_ne!(first.id, second.id);
+    assert!(ai_tasks::create_task_impl(&state, payload()).unwrap_err().contains("这个时间段"));
+    let mut other = payload(); other.linked_action_id = 104;
+    let other = ai_tasks::create_task_impl(&state, other).unwrap();
+    assert!(ai_tasks::replace_task_impl(&state, other.id, 103, other.updated_at).is_err());
+    ai_tasks::delete_task_impl(&state, first.id, first.updated_at).unwrap();
+    let replaced = ai_tasks::replace_task_impl(&state, other.id, 103, other.updated_at).unwrap();
+    assert_eq!(replaced.slot_id, Some(201));
+    let conn = state.db.lock().unwrap();
+    let tasks = ai_tasks::list_tasks(&conn, "2026-09-29").unwrap();
+    assert_eq!(tasks.len(), 2);
+    assert!(tasks.iter().any(|task| task.id == second.id && task.slot_id == Some(202)));
+    assert!(conn.execute(
+        "INSERT INTO ai_tasks(space_id,slot_id,action_id,linked_action_id,list_date,title,created_at,updated_at)
+         SELECT space_id,slot_id,action_id,linked_action_id,list_date,title,created_at,updated_at
+         FROM ai_tasks WHERE id=?1", [second.id],
+    ).is_err());
+}
+
+#[test]
+fn swapping_slots_with_the_same_ai_action_preserves_each_record_and_rolls_back_on_failure() {
+    let state = state();
+    let mut first = payload(); first.fields.result = "First slot result".into();
+    let first = ai_tasks::create_task_impl(&state, first).unwrap();
+    let mut second = payload(); second.slot_id = 202; second.fields.result = "Second slot result".into();
+    let second = ai_tasks::create_task_impl(&state, second).unwrap();
+    daily_schedule::move_slot_action_impl(&state, "2026-09-29", 201, 202).unwrap();
+    {
+        let conn = state.db.lock().unwrap();
+        let tasks = ai_tasks::list_tasks(&conn, "2026-09-29").unwrap();
+        assert!(tasks.iter().any(|task| task.id == first.id && task.slot_id == Some(202) && task.result == "First slot result"));
+        assert!(tasks.iter().any(|task| task.id == second.id && task.slot_id == Some(201) && task.result == "Second slot result"));
+        conn.execute_batch(
+            "CREATE TRIGGER fail_reattach BEFORE UPDATE OF slot_id ON ai_tasks
+             WHEN NEW.slot_id IS NOT NULL BEGIN SELECT RAISE(ABORT,'test move failure'); END;",
+        ).unwrap();
+    }
+    assert!(daily_schedule::move_slot_action_impl(&state, "2026-09-29", 201, 202).is_err());
+    let conn = state.db.lock().unwrap();
+    let tasks = ai_tasks::list_tasks(&conn, "2026-09-29").unwrap();
+    assert!(tasks.iter().any(|task| task.id == first.id && task.slot_id == Some(202)));
+    assert!(tasks.iter().any(|task| task.id == second.id && task.slot_id == Some(201)));
+    assert_eq!(conn.query_row("SELECT actual_notes FROM daily_schedule_slots WHERE id=202", [], |r| r.get::<_, String>(0)).unwrap(), "Keep review");
+}
+
+fn legacy_v22(conn: &mut Connection) {
+    conn.execute_batch(
+        "DROP INDEX idx_ai_task_attachment;
+         CREATE UNIQUE INDEX idx_ai_task_attachment ON ai_tasks(space_id,list_date,action_id,linked_action_id)
+         WHERE deleted_at IS NULL;",
+    ).unwrap();
+    conn.pragma_update(None, "user_version", 22).unwrap();
+}
+
+#[test]
+fn v22_upgrade_preserves_records_and_allows_cross_slot_attachments() {
+    let state = state();
+    let mut first = payload(); first.fields.result = "Keep historical result".into();
+    ai_tasks::create_task_impl(&state, first).unwrap();
+    let mut removed = payload(); removed.linked_action_id = 104;
+    let removed = ai_tasks::create_task_impl(&state, removed).unwrap();
+    ai_tasks::delete_task_impl(&state, removed.id, removed.updated_at).unwrap();
+    {
+        let mut conn = state.db.lock().unwrap();
+        legacy_v22(&mut conn);
+        let before = serde_json::to_value(ai_tasks::list_tasks(&conn, "2026-09-29").unwrap()).unwrap();
+        run_migrations(&mut conn).unwrap();
+        run_migrations(&mut conn).unwrap();
+        assert_eq!(serde_json::to_value(ai_tasks::list_tasks(&conn, "2026-09-29").unwrap()).unwrap(), before);
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM ai_tasks", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
+        assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i32>(0)).unwrap(), 23);
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    }
+    let mut second = payload(); second.slot_id = 202;
+    assert!(ai_tasks::create_task_impl(&state, second).is_ok());
+}
+
+#[test]
+fn failed_v22_upgrade_keeps_old_index_version_and_records() {
+    let state = state();
+    ai_tasks::create_task_impl(&state, payload()).unwrap();
+    let mut conn = state.db.lock().unwrap();
+    legacy_v22(&mut conn);
+    // A malformed historical row must abort the index upgrade, not be discarded.
+    conn.execute(
+        "INSERT INTO ai_tasks(space_id,slot_id,action_id,linked_action_id,list_date,title,created_at,updated_at)
+         SELECT space_id,slot_id,action_id,linked_action_id,'2026-09-30',title,created_at,updated_at FROM ai_tasks", [],
+    ).unwrap();
+    assert!(run_migrations(&mut conn).is_err());
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i32>(0)).unwrap(), 22);
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM ai_tasks", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
+    let index: String = conn.query_row("SELECT sql FROM sqlite_master WHERE name='idx_ai_task_attachment'", [], |r| r.get(0)).unwrap();
+    assert!(index.contains("list_date"));
+}
+
+#[test]
 fn replacing_ai_action_is_atomic_and_keeps_source_progress() {
     let state = state();
     let mut request = payload();
@@ -500,7 +601,10 @@ fn deleting_an_attachment_slot_preserves_task_without_reanchoring_it() {
 fn legacy_v20(conn: &mut Connection) {
     conn.execute_batch(
         "DROP INDEX idx_ai_tasks_slot;
+         DROP INDEX idx_ai_task_attachment;
          ALTER TABLE ai_tasks DROP COLUMN slot_id;
+         CREATE UNIQUE INDEX idx_ai_task_attachment ON ai_tasks(space_id,list_date,action_id,linked_action_id)
+         WHERE deleted_at IS NULL;
          UPDATE daily_schedule_slots SET start_time='13:30',end_time='14:30' WHERE id=202;",
     ).unwrap();
     conn.pragma_update(None, "user_version", 20).unwrap();

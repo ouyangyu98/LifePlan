@@ -4,9 +4,11 @@ import { ChartNoAxesCombined, Info, RotateCcw } from "lucide-react";
 import { eventsApi } from "@/lib/api";
 import { formatDuration, summarizeDailyReview, summarizeDailySchedule } from "@/lib/dailyStatistics";
 import { dailyAiSummary } from "@/lib/aiTasks";
+import { useFeaturePreferences } from "@/lib/featurePreferences";
 import type { AiTask, DailyScheduleSlot, Event } from "@/types";
 
 export default function DailyStatistics({ date, slots, aiTasks = [] }: { date: string; slots: DailyScheduleSlot[]; aiTasks?: AiTask[] }) {
+  const { features } = useFeaturePreferences();
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -68,7 +70,7 @@ export default function DailyStatistics({ date, slots, aiTasks = [] }: { date: s
         <Progress type="circle" size={70} strokeWidth={7} strokeColor="#16846c"
           percent={review.efficientPercentage ?? 0} status="normal"
           format={() => review.efficientPercentage === null ? "--" : `${review.efficientPercentage}%`} />
-        <div><span className="daily-review-metric-label">高效时段占比<Tooltip title="已复盘中，同时标记为专注且达到预期的时间段占比；按时间段时长计算，不含并行 AI 时长。"><Info size={13} tabIndex={0} aria-label="高效时段占比口径" /></Tooltip></span>
+        <div><span className="daily-review-metric-label">高效时段占比<Tooltip title={`已复盘中，同时标记为专注且达到预期的时间段占比；按时间段时长计算${features.aiParallel ? "，不含并行 AI 时长" : ""}。`}><Info size={13} tabIndex={0} aria-label="高效时段占比口径" /></Tooltip></span>
           <strong>{review.reviewedMinutes ? formatDuration(review.efficientMinutes) : "暂无复盘"}</strong>
           <span>已复盘 {formatDuration(review.reviewedMinutes)}</span>
         </div>
@@ -83,7 +85,7 @@ export default function DailyStatistics({ date, slots, aiTasks = [] }: { date: s
         </div>
       </div>
     </div>
-    {ai.count > 0 && <div className="daily-ai-statistics" aria-label="AI 任务统计">
+    {features.aiParallel && ai.count > 0 && <div className="daily-ai-statistics" aria-label="AI 任务统计">
       <span>AI 任务 <strong>{ai.count}</strong> 项</span>
       <span>已安排时长 <strong>{formatDuration(ai.minutes)}</strong></span>
       {ai.untimed > 0 && <span>未设时间 {ai.untimed} 项</span>}

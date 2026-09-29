@@ -141,10 +141,10 @@ fn insert_task(tx: &Connection, payload: NewAiTask) -> Result<AiTask, String> {
     let (title, notes, linked_version) = linked.ok_or("请选择可安排的待办行动")?;
     let exists: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM ai_tasks WHERE space_id=?1 AND list_date=?2 AND action_id=?3
-         AND linked_action_id=?4 AND deleted_at IS NULL)",
-        params![space, payload.list_date, payload.action_id, payload.linked_action_id], |row| row.get(0),
+         AND linked_action_id=?4 AND slot_id=?5 AND deleted_at IS NULL)",
+        params![space, payload.list_date, payload.action_id, payload.linked_action_id, payload.slot_id], |row| row.get(0),
     ).map_err(|error| error.to_string())?;
-    if exists { return Err("该行动已挂载，请勿重复添加".into()); }
+    if exists { return Err("该行动已挂载到这个时间段，请勿重复添加".into()); }
     let f = payload.fields;
     let now = now_millis().max(linked_version + 1);
     tx.execute(

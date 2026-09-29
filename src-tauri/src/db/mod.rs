@@ -135,6 +135,7 @@ pub fn run_migrations(conn: &mut Connection) -> Result<bool, DbError> {
         ai_task_actions::migrate(conn)?;
         ai_task_slots::migrate(conn)?;
         migrate_event_delay_resume(conn)?;
+        migrate_ai_slot_uniqueness(conn)?;
         return Ok(true);
     }
     if version == 15 {
@@ -172,6 +173,9 @@ pub fn run_migrations(conn: &mut Connection) -> Result<bool, DbError> {
         migrate_event_delay_resume(conn)?;
     }
     if (18..=22).contains(&upgraded_version) {
+        migrate_ai_slot_uniqueness(conn)?;
+    }
+    if (18..=23).contains(&upgraded_version) {
         validate_current_schema(conn)?;
         conn.prepare("SELECT delay_resume_status FROM events LIMIT 0")?;
         conn.prepare("SELECT id,space_id,action_id,linked_action_id,slot_id,list_date,title,status,start_time,end_time,notes,result,deleted_at,created_at,updated_at FROM ai_tasks LIMIT 0")
@@ -181,6 +185,20 @@ pub fn run_migrations(conn: &mut Connection) -> Result<bool, DbError> {
     Err(DbError::MigrationFailed(format!(
         "不支持从数据库版本 v{version} 升级；项目概念及其历史数据兼容已移除，请使用 v15 数据库或重新初始化。"
     )))
+}
+
+fn migrate_ai_slot_uniqueness(conn: &mut Connection) -> Result<(), DbError> {
+    let tx = conn.transaction()?;
+    // Keep historical/detached records intact; only active attachments are unique.
+    tx.execute_batch(
+        "DROP INDEX idx_ai_task_attachment;
+         CREATE UNIQUE INDEX idx_ai_task_attachment
+         ON ai_tasks(space_id,slot_id,action_id,linked_action_id)
+         WHERE deleted_at IS NULL AND slot_id IS NOT NULL;",
+    )?;
+    tx.pragma_update(None, "user_version", 23)?;
+    tx.commit()?;
+    Ok(())
 }
 
 fn migrate_event_delay_resume(conn: &mut Connection) -> Result<(), DbError> {

@@ -3,12 +3,16 @@ import { aiTasksApi } from "@/lib/api";
 import { userFacingError } from "@/lib/errors";
 import type { AiTask, DailyScheduleSlot } from "@/types";
 
-export function useDailyAiTasks(date: string) {
+export function useDailyAiTasks(date: string, enabled = true) {
   const [state, setState] = useState<{ date: string; tasks: AiTask[]; loading: boolean; error: string }>({
     date, tasks: [], loading: true, error: "",
   });
   const [version, setVersion] = useState(0);
   useEffect(() => {
+    if (!enabled) {
+      setState({ date, tasks: [], loading: false, error: "" });
+      return;
+    }
     let active = true;
     setState({ date, tasks: [], loading: true, error: "" });
     aiTasksApi.list(date).then((tasks) => {
@@ -17,7 +21,7 @@ export function useDailyAiTasks(date: string) {
       if (active) setState({ date, tasks: [], loading: false, error: userFacingError(cause) });
     });
     return () => { active = false; };
-  }, [date, version]);
+  }, [date, version, enabled]);
   const upsert = (task: AiTask) => setState((current) => current.date !== task.list_date ? current : {
     ...current, tasks: current.tasks.some((item) => item.id === task.id)
       ? current.tasks.map((item) => item.id === task.id ? task : item)
@@ -37,9 +41,9 @@ export function useDailyAiTasks(date: string) {
     setVersion(current => current + 1);
   };
   return {
-    tasks: state.date === date ? state.tasks : [],
-    loading: state.date !== date || state.loading,
-    error: state.date === date ? state.error : "",
+    tasks: enabled && state.date === date ? state.tasks : [],
+    loading: enabled && (state.date !== date || state.loading),
+    error: enabled && state.date === date ? state.error : "",
     retry: () => setVersion((current) => current + 1), upsert, remove, moveWithSlots,
   };
 }
