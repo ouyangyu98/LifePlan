@@ -25,11 +25,8 @@ fn time_minutes(value: &str, allow_day_end: bool) -> Option<u32> {
 }
 
 fn validate_fields(fields: &AiTaskFields) -> Result<(), String> {
-    if fields.title.trim().is_empty() || fields.title.trim().chars().count() > 100 {
-        return Err("任务名称需为 1 至 100 个字".into());
-    }
-    if fields.notes.chars().count() > 10000 || fields.result.chars().count() > 20000 {
-        return Err("任务说明或结果内容过长".into());
+    if fields.result.chars().count() > 20000 {
+        return Err("结果内容过长".into());
     }
     match (&fields.start_time, &fields.end_time) {
         (None, None) => {},
@@ -55,13 +52,33 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<AiTask> {
         id: row.get(0)?, action_id: row.get(1)?, list_date: row.get(2)?, title: row.get(3)?,
         status, start_time: row.get(5)?, end_time: row.get(6)?, notes: row.get(7)?,
         result: row.get(8)?, created_at: row.get(9)?, updated_at: row.get(10)?,
+        linked_action_id: row.get(11)?, event_title: row.get(12)?, read_only: row.get(13)?,
     })
 }
 
 const SELECT_TASK: &str =
-    "SELECT t.id,t.action_id,t.list_date,t.title,t.status,t.start_time,t.end_time,t.notes,t.result,t.created_at,t.updated_at
+    "SELECT t.id,t.action_id,t.list_date,linked.title,
+            CASE WHEN linked.status=1 THEN 'completed'
+                 WHEN linked.status=2 THEN 'paused'
+                 WHEN t.status='completed' THEN 'queued' ELSE t.status END,
+            t.start_time,t.end_time,COALESCE(linked.description,''),t.result,t.created_at,
+            MAX(t.updated_at,linked.updated_at,e.updated_at),linked.id,e.title,
+            (linked.status=2 OR e.status IN (4,5))
      FROM ai_tasks t JOIN actions a ON a.id=t.action_id AND a.space_id=t.space_id
-     WHERE t.space_id=?1 AND t.deleted_at IS NULL AND a.deleted_at IS NULL";
+     JOIN actions linked ON linked.id=t.linked_action_id AND linked.space_id=t.space_id
+     JOIN events e ON e.id=linked.event_id AND e.space_id=t.space_id
+     WHERE t.space_id=?1 AND t.deleted_at IS NULL AND a.deleted_at IS NULL
+       AND linked.deleted_at IS NULL AND e.deleted_at IS NULL";
+
+fn sync_completion(conn: &Connection, space: &str, action_id: i64, status: &AiTaskStatus, timestamp: i64) -> Result<(), String> {
+    let completed = matches!(status, AiTaskStatus::Completed);
+    conn.execute(
+        "UPDATE actions SET status=?1,completed_at=?2,updated_at=?3
+         WHERE id=?4 AND space_id=?5 AND deleted_at IS NULL AND status IN (0,1) AND status<>?1",
+        params![i32::from(completed), completed.then_some(timestamp), timestamp, action_id, space],
+    ).map_err(|error| error.to_string())?;
+    Ok(())
+}
 
 pub(super) fn list_tasks(conn: &Connection, date: &str) -> Result<Vec<AiTask>, String> {
     validate_date(date)?;
@@ -92,23 +109,46 @@ pub fn create_ai_task(state: State<'_, AppState>, payload: NewAiTask) -> Result<
 pub(super) fn create_task_impl(state: &AppState, payload: NewAiTask) -> Result<AiTask, String> {
     validate_date(&payload.list_date)?;
     validate_fields(&payload.fields)?;
-    let conn = state.db.lock().map_err(|error| error.to_string())?;
-    let space = current_space_id(&conn).map_err(|error| error.to_string())?;
-    let scheduled: bool = conn.query_row(
+    if payload.action_id == payload.linked_action_id {
+        return Err("不能将主行动挂载到自身".into());
+    }
+    let mut conn = state.db.lock().map_err(|error| error.to_string())?;
+    let tx = conn.transaction().map_err(|error| error.to_string())?;
+    let space = current_space_id(&tx).map_err(|error| error.to_string())?;
+    let scheduled: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM daily_schedule_slots s JOIN actions a ON a.id=s.action_id AND a.space_id=s.space_id
          WHERE s.space_id=?1 AND s.list_date=?2 AND a.id=?3 AND a.deleted_at IS NULL)",
         params![space, payload.list_date, payload.action_id], |row| row.get(0),
     ).map_err(|error| error.to_string())?;
     if !scheduled { return Err("主行动未安排到当天，请刷新后重试".into()); }
-    let f = payload.fields;
-    let now = now_millis();
-    conn.execute(
-        "INSERT INTO ai_tasks (space_id,action_id,list_date,title,status,start_time,end_time,notes,result,created_at,updated_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10)",
-        params![space, payload.action_id, payload.list_date, f.title.trim(), f.status.as_str(),
-                f.start_time, f.end_time, f.notes, f.result, now],
+    let linked: Option<(String, String, i64)> = tx.query_row(
+        "SELECT a.title,COALESCE(a.description,''),MAX(a.updated_at,e.updated_at)
+         FROM actions a JOIN events e ON e.id=a.event_id AND e.space_id=a.space_id
+         WHERE a.id=?1 AND a.space_id=?2 AND a.deleted_at IS NULL AND a.status=0
+           AND e.deleted_at IS NULL AND e.status=1",
+        params![payload.linked_action_id, space],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).optional().map_err(|error| error.to_string())?;
+    let (title, notes, linked_version) = linked.ok_or("请选择事件篮中进行中事件的待办行动")?;
+    let exists: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM ai_tasks WHERE space_id=?1 AND list_date=?2 AND action_id=?3
+         AND linked_action_id=?4 AND deleted_at IS NULL)",
+        params![space, payload.list_date, payload.action_id, payload.linked_action_id], |row| row.get(0),
     ).map_err(|error| error.to_string())?;
-    read_task(&conn, &space, conn.last_insert_rowid())
+    if exists { return Err("该行动已挂载，请勿重复添加".into()); }
+    let f = payload.fields;
+    let now = now_millis().max(linked_version + 1);
+    tx.execute(
+        "INSERT INTO ai_tasks (space_id,action_id,list_date,title,status,start_time,end_time,notes,result,created_at,updated_at,linked_action_id)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10,?11)",
+        params![space, payload.action_id, payload.list_date, title, f.status.as_str(),
+                f.start_time, f.end_time, notes, f.result, now, payload.linked_action_id],
+    ).map_err(|error| error.to_string())?;
+    let id = tx.last_insert_rowid();
+    sync_completion(&tx, &space, payload.linked_action_id, &f.status, now)?;
+    let task = read_task(&tx, &space, id)?;
+    tx.commit().map_err(|error| error.to_string())?;
+    Ok(task)
 }
 
 #[tauri::command]
@@ -118,20 +158,27 @@ pub fn update_ai_task(state: State<'_, AppState>, payload: UpdateAiTask) -> Resu
 
 pub(super) fn update_task_impl(state: &AppState, payload: UpdateAiTask) -> Result<AiTask, String> {
     validate_fields(&payload.fields)?;
-    let conn = state.db.lock().map_err(|error| error.to_string())?;
-    let space = current_space_id(&conn).map_err(|error| error.to_string())?;
-    let task = read_task(&conn, &space, payload.id)?;
+    let mut conn = state.db.lock().map_err(|error| error.to_string())?;
+    let tx = conn.transaction().map_err(|error| error.to_string())?;
+    let space = current_space_id(&tx).map_err(|error| error.to_string())?;
+    let task = read_task(&tx, &space, payload.id)?;
+    if task.read_only {
+        return Err("所属事件已完成或放弃，请在事件篮中恢复后再修改".into());
+    }
     if task.updated_at != payload.expected_updated_at {
         return Err("任务已被更新，请关闭后重新打开".into());
     }
     let f = payload.fields;
     let timestamp = now_millis().max(task.updated_at + 1);
-    conn.execute(
-        "UPDATE ai_tasks SET title=?1,status=?2,start_time=?3,end_time=?4,notes=?5,result=?6,updated_at=?7
-         WHERE id=?8 AND space_id=?9 AND deleted_at IS NULL",
-        params![f.title.trim(), f.status.as_str(), f.start_time, f.end_time, f.notes, f.result, timestamp, payload.id, space],
+    tx.execute(
+        "UPDATE ai_tasks SET status=?1,start_time=?2,end_time=?3,result=?4,updated_at=?5
+         WHERE id=?6 AND space_id=?7 AND deleted_at IS NULL",
+        params![f.status.as_str(), f.start_time, f.end_time, f.result, timestamp, payload.id, space],
     ).map_err(|error| error.to_string())?;
-    read_task(&conn, &space, payload.id)
+    sync_completion(&tx, &space, task.linked_action_id, &f.status, timestamp)?;
+    let updated = read_task(&tx, &space, payload.id)?;
+    tx.commit().map_err(|error| error.to_string())?;
+    Ok(updated)
 }
 
 #[tauri::command]

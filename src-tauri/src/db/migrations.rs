@@ -1,4 +1,4 @@
-pub const CURRENT_SCHEMA_VERSION: i32 = 19;
+pub const CURRENT_SCHEMA_VERSION: i32 = 20;
 
 pub const AI_TASKS_MIGRATION: &str = r#"
 CREATE TABLE IF NOT EXISTS ai_tasks (

@@ -68,7 +68,7 @@ const hours = [
 const toDateString = (value: Dayjs | string | undefined) =>
   typeof value === "string" ? value : value?.format("YYYY-MM-DD");
 const formatDuration = (value: number) =>
-  value === 0 ? "未设置预计耗时" : value === 0.5 ? "30分钟" : `${value}小时`;
+  value === 0.5 ? "30分钟" : `${value}小时`;
 const compareActionDate = (left: Action, right: Action) => {
   if (
     left.start_date &&
@@ -1050,19 +1050,21 @@ function EventActionList({
             </span>
           }
           description={
-            <Space className="action-meta" wrap>
-              <span className="action-start-meta">
-                {action.start_date
-                  ? `${action.start_date} 开始`
-                  : "未设置开始日期"}
-              </span>
-              <span className="action-duration-meta">
-                {formatDuration(action.estimated_hours)}
-              </span>
-              {action.description && (
-                <span className="action-detail-meta">{action.description}</span>
-              )}
-            </Space>
+            action.start_date || action.estimated_hours > 0 || action.description ? (
+              <Space className="action-meta" wrap>
+                {action.start_date && (
+                  <span className="action-start-meta">{action.start_date} 开始</span>
+                )}
+                {action.estimated_hours > 0 && (
+                  <span className="action-duration-meta">
+                    {formatDuration(action.estimated_hours)}
+                  </span>
+                )}
+                {action.description && (
+                  <span className="action-detail-meta">{action.description}</span>
+                )}
+              </Space>
+            ) : undefined
           }
         />
         {isDropTarget && (

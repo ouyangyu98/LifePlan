@@ -28,7 +28,9 @@ test("personal features UI with isolated Tauri fixtures", { timeout: 120000 }, a
         }))),
         actions: [
           { ...empty, id: 1, event_id: 11, title: "第一项子任务", status: 0, estimated_hours: 0.5, sort_order: 1 },
-          { ...empty, id: 2, event_id: 12, title: "第二项子任务", status: 0, estimated_hours: 1, sort_order: 1 },
+          { ...empty, id: 2, event_id: 12, title: "第二项子任务", status: 0, start_date: "2026-09-29", estimated_hours: 1, sort_order: 1 },
+          { ...empty, id: 3, event_id: 13, title: "仅有开始日期", status: 0, start_date: "2026-09-30", estimated_hours: 0, description: "保留任务说明", sort_order: 1 },
+          { ...empty, id: 4, event_id: 13, title: "未填可选信息", status: 0, estimated_hours: 0, sort_order: 2 },
         ],
         note: { space_id: "test-space", content: "", updated_at: 0 },
       };
@@ -133,6 +135,8 @@ test("personal features UI with isolated Tauri fixtures", { timeout: 120000 }, a
     await switchView("列表");
     let row = page.locator(".record-card").filter({ hasText: "事件1-1" });
     await row.getByRole("button", { name: "行动 0/1" }).click();
+    assert.equal(await row.locator(".action-start-meta").count(), 0);
+    assert.equal(await row.locator(".action-duration-meta").innerText(), "30分钟");
     await row.locator("[data-event-action-id='1']").getByRole("button", { name: "完成", exact: true }).click();
     await row.getByRole("button", { name: "行动 1/1" }).waitFor();
     assert.equal(await page.evaluate(() => window.fixture.events.find((item) => item.id === 11).status), 1);
@@ -143,9 +147,25 @@ test("personal features UI with isolated Tauri fixtures", { timeout: 120000 }, a
     await page.getByRole("tab", { name: /进行中/ }).click();
     row = page.locator(".record-card").filter({ hasText: "事件1-2" });
     await row.getByRole("button", { name: "行动 0/1" }).click();
+    assert.equal(await row.locator(".action-start-meta").innerText(), "2026-09-29 开始");
+    assert.equal(await row.locator(".action-duration-meta").innerText(), "1小时");
     await row.locator("[data-event-action-id='2']").getByRole("button", { name: "完成", exact: true }).click();
     await row.getByRole("button", { name: "行动 1/1" }).waitFor();
     assert.equal(await page.evaluate(() => window.fixture.events.find((item) => item.id === 12).status), 1);
+
+    row = page.locator(".record-card").filter({ hasText: "事件1-3" });
+    await row.getByRole("button", { name: "行动 0/2" }).click();
+    const dateOnly = row.locator("[data-event-action-id='3']");
+    assert.equal(await dateOnly.locator(".action-start-meta").innerText(), "2026-09-30 开始");
+    assert.equal(await dateOnly.locator(".action-duration-meta").count(), 0);
+    assert.equal(await dateOnly.locator(".action-detail-meta").innerText(), "保留任务说明");
+    assert.equal(await row.locator("[data-event-action-id='4'] .action-meta").count(), 0);
+    assert.doesNotMatch(await row.innerText(), /未设置开始日期|未设置预计耗时/);
+    await screenshot("inbox-optional-metadata.png");
+    await switchView("列表");
+    assert.equal(await row.locator("[data-event-action-id='4'] .action-meta").count(), 0);
+    assert.equal(await row.locator(".action-duration-meta").count(), 0);
+    await switchView("看板");
 
     await page.getByRole("button", { name: "管理分类" }).click();
     let dialog = page.getByRole("dialog");

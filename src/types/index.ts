@@ -155,21 +155,24 @@ export interface DailyScheduleSlot {
 export interface DailySchedule { list_date: string; slots: DailyScheduleSlot[] }
 export type AiTaskStatus = "queued" | "running" | "paused" | "ready" | "completed" | "failed";
 export interface AiTaskFields {
-  title: string;
   status: AiTaskStatus;
   start_time?: string | null;
   end_time?: string | null;
-  notes: string;
   result: string;
 }
 export interface AiTask extends AiTaskFields {
   id: number;
   action_id: number;
+  linked_action_id: number;
+  title: string;
+  notes: string;
+  event_title: string;
+  read_only: boolean;
   list_date: string;
   created_at: number;
   updated_at: number;
 }
-export interface NewAiTask extends AiTaskFields { action_id: number; list_date: string }
+export interface NewAiTask extends AiTaskFields { action_id: number; linked_action_id: number; list_date: string }
 export interface UpdateAiTask extends AiTaskFields { id: number; expected_updated_at: number }
 export interface NewDailySlot { list_date: string; start_time: string; end_time: string }
 export interface UpdateDailySlot { id: number; start_time: string; end_time: string }

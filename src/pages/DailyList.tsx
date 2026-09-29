@@ -111,7 +111,7 @@ export default function DailyList() {
     <DailySlotModal slot={selectedSlot} onClose={() => setSelectedSlot(null)} onSaved={(slot) => { refreshSlot(slot); setSelectedSlot(slot); }} />
     <TimeSlotModal slot={timeSlot} onClose={() => setTimeSlot(null)} onSaved={async () => { setTimeSlot(null); await load(); }} onDeleted={async () => { setTimeSlot(null); await load(); message.success("时间段已删除"); }} />
     <InsertSlotModal date={date} preset={insertPreset} onClose={() => setInsertPreset(null)} onSaved={async () => { setInsertPreset(null); await load(); message.success("已新增时间段"); }} />
-    {aiSelection && aiSelection.slot.list_date === date && <DailyAiTaskEditor key={`${date}:${aiSelection.task?.id ?? `new-${aiSelection.slot.id}`}`} selection={aiSelection} onClose={() => setAiSelection(null)} onSaved={ai.upsert} onDeleted={ai.remove} onRefresh={ai.retry} />}
+    {aiSelection && aiSelection.slot.list_date === date && <DailyAiTaskEditor key={`${date}:${aiSelection.task?.id ?? `new-${aiSelection.slot.id}`}`} selection={aiSelection} attachedTasks={ai.tasks} onClose={() => setAiSelection(null)} onSaved={(task) => { ai.upsert(task); ai.retry(); void load(); }} onDeleted={ai.remove} onRefresh={ai.retry} onOpenInbox={() => { setAiSelection(null); navigate("/inbox"); }} />}
     {!loading && !error && schedule?.list_date === date && features.dailyStatistics && <DailyStatistics key={date} date={date} slots={slots} aiTasks={ai.tasks} />}
     {features.workLog && workLogOpen && <WorkLogModal date={date} slots={slots} onClose={() => setWorkLogOpen(false)} />}
   </div>;

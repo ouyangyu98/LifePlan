@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 pub mod backup;
 pub mod migrations;
+mod ai_task_actions;
 mod retire_delegation;
 
 #[derive(Error, Debug)]
@@ -144,8 +145,9 @@ pub fn run_migrations(conn: &mut Connection) -> Result<bool, DbError> {
             .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
         conn.execute_batch(migrations::AI_TASKS_MIGRATION)
             .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
-        conn.pragma_update(None, "user_version", migrations::CURRENT_SCHEMA_VERSION)
+        conn.pragma_update(None, "user_version", 19)
             .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
+        ai_task_actions::migrate(conn)?;
         return Ok(true);
     }
     if version == 15 {
@@ -173,9 +175,12 @@ pub fn run_migrations(conn: &mut Connection) -> Result<bool, DbError> {
             .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
         tx.commit().map_err(|error| DbError::MigrationFailed(error.to_string()))?;
     }
-    if upgraded_version == 18 || upgraded_version == migrations::CURRENT_SCHEMA_VERSION {
+    if upgraded_version == 18 || upgraded_version == 19 {
+        ai_task_actions::migrate(conn)?;
+    }
+    if upgraded_version == 18 || upgraded_version == 19 || upgraded_version == migrations::CURRENT_SCHEMA_VERSION {
         validate_current_schema(conn)?;
-        conn.prepare("SELECT id,space_id,action_id,list_date,title,status,start_time,end_time,notes,result,deleted_at,created_at,updated_at FROM ai_tasks LIMIT 0")
+        conn.prepare("SELECT id,space_id,action_id,linked_action_id,list_date,title,status,start_time,end_time,notes,result,deleted_at,created_at,updated_at FROM ai_tasks LIMIT 0")
             .map_err(|error| DbError::MigrationFailed(error.to_string()))?;
         return Ok(false);
     }

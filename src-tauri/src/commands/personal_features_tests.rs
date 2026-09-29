@@ -212,7 +212,8 @@ fn migrated_actions_decode_identically_in_daily_readers_and_delete_keeps_parent(
         let mut conn = state.db.lock().unwrap();
         let space = current_space_id(&conn).unwrap();
         conn.execute_batch(
-            "ALTER TABLE events ADD COLUMN delegated_to TEXT;
+            "DROP TABLE ai_tasks;
+             ALTER TABLE events ADD COLUMN delegated_to TEXT;
              ALTER TABLE actions ADD COLUMN is_delegated_follow_up INTEGER DEFAULT 0;"
         ).unwrap();
         conn.execute("UPDATE events SET status=2,delegated_to='Historical person',updated_at=123 WHERE id=?1", [e.id]).unwrap();

@@ -1,4 +1,4 @@
-use super::{ai_tasks, daily_schedule};
+use super::{actions, ai_tasks, daily_schedule};
 use crate::db::{current_space_id, ensure_current_space, run_migrations, AppState};
 use crate::models::{AiTaskFields, AiTaskStatus, NewAiTask, UpdateAiTask};
 use rusqlite::{params, Connection};
@@ -9,8 +9,15 @@ fn state() -> AppState {
     run_migrations(&mut conn).unwrap();
     let space = ensure_current_space(&mut conn).unwrap();
     conn.execute(
-        "INSERT INTO actions (id,space_id,sync_id,title,status,created_at,updated_at)
-         VALUES (101,?1,'ai-parent','Parent',0,1,1),(102,?1,'ai-other','Other',1,1,1)",
+        "INSERT INTO events (id,space_id,sync_id,title,status,created_at,updated_at)
+         VALUES (11,?1,'parent-event','Parent event',1,1,1),(12,?1,'linked-event','Linked event',1,1,1)",
+        [&space],
+    ).unwrap();
+    conn.execute(
+        "INSERT INTO actions (id,space_id,sync_id,event_id,title,description,status,created_at,updated_at)
+         VALUES (101,?1,'ai-parent',11,'Parent','',0,1,1),(102,?1,'ai-other',11,'Other','',1,1,1),
+                (103,?1,'ai-linked',12,'Research','Task instructions',0,1,1),
+                (104,?1,'ai-linked-other',12,'More research','',0,1,1)",
         [&space],
     ).unwrap();
     conn.execute(
@@ -28,14 +35,14 @@ fn state() -> AppState {
 
 fn fields() -> AiTaskFields {
     AiTaskFields {
-        title: "  Research  ".into(), status: AiTaskStatus::Queued,
+        status: AiTaskStatus::Queued,
         start_time: Some("09:00".into()), end_time: Some("11:30".into()),
-        notes: "Task instructions".into(), result: String::new(),
+        result: String::new(),
     }
 }
 
 fn payload() -> NewAiTask {
-    NewAiTask { action_id: 101, list_date: "2026-09-29".into(), fields: fields() }
+    NewAiTask { action_id: 101, linked_action_id: 103, list_date: "2026-09-29".into(), fields: fields() }
 }
 
 #[test]
@@ -44,6 +51,8 @@ fn ai_crud_preserves_parent_review_and_supports_all_manual_states() {
     let before = serde_json::to_value(daily_schedule::slot_query(&state.db.lock().unwrap(), "2026-09-29").unwrap()).unwrap();
     let mut task = ai_tasks::create_task_impl(&state, payload()).unwrap();
     assert_eq!(task.title, "Research");
+    assert_eq!(task.notes, "Task instructions");
+    assert_eq!(task.event_title, "Linked event");
     assert_eq!(ai_tasks::list_tasks(&state.db.lock().unwrap(), "2026-09-29").unwrap().len(), 1);
     for status in [AiTaskStatus::Running, AiTaskStatus::Paused, AiTaskStatus::Failed, AiTaskStatus::Ready, AiTaskStatus::Completed, AiTaskStatus::Queued] {
         let expected = status.as_str();
@@ -55,6 +64,10 @@ fn ai_crud_preserves_parent_review_and_supports_all_manual_states() {
         assert!(task.updated_at > previous);
         assert_eq!(task.status.as_str(), expected);
         assert_eq!(task.result, "Result\n<script>plain text</script>");
+        let linked_status: i32 = state.db.lock().unwrap().query_row(
+            "SELECT status FROM actions WHERE id=103", [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(linked_status, i32::from(expected == "completed"));
     }
     ai_tasks::delete_task_impl(&state, task.id, task.updated_at).unwrap();
     let conn = state.db.lock().unwrap();
@@ -62,6 +75,7 @@ fn ai_crud_preserves_parent_review_and_supports_all_manual_states() {
     assert_eq!(serde_json::to_value(daily_schedule::slot_query(&conn, "2026-09-29").unwrap()).unwrap(), before);
     let preserved: String = conn.query_row("SELECT result FROM ai_tasks WHERE id=?1 AND deleted_at IS NOT NULL", [task.id], |row| row.get(0)).unwrap();
     assert_eq!(preserved, task.result);
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM actions WHERE id=103 AND deleted_at IS NULL", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
 }
 
 #[test]
@@ -81,10 +95,12 @@ fn ai_validation_rejects_bad_dates_times_and_missing_parent_without_writes() {
         request.fields.start_time = start.map(str::to_string); request.fields.end_time = end.map(str::to_string);
         assert!(ai_tasks::create_task_impl(&state, request).is_err());
     }
-    for title in [" ".to_string(), "a".repeat(101)] {
-        let mut request = payload(); request.fields.title = title;
+    for linked_action_id in [101, 102, 999] {
+        let mut request = payload(); request.linked_action_id = linked_action_id;
         assert!(ai_tasks::create_task_impl(&state, request).is_err());
     }
+    let mut request = payload(); request.fields.result = "a".repeat(20001);
+    assert!(ai_tasks::create_task_impl(&state, request).is_err());
     let mut request = payload(); request.action_id = 999;
     assert!(ai_tasks::create_task_impl(&state, request).is_err());
     let mut request = payload(); request.list_date = "2026-10-01".into();
@@ -93,7 +109,8 @@ fn ai_validation_rejects_bad_dates_times_and_missing_parent_without_writes() {
     assert!(ai_tasks::list_tasks(&state.db.lock().unwrap(), "2026-09-29").unwrap().is_empty());
     let mut request = payload(); request.fields.start_time = None; request.fields.end_time = None;
     assert!(ai_tasks::create_task_impl(&state, request).is_ok());
-    let mut request = payload(); request.fields.start_time = Some("23:30".into()); request.fields.end_time = Some("24:00".into());
+    assert!(ai_tasks::create_task_impl(&state, payload()).is_err());
+    let mut request = payload(); request.linked_action_id = 104; request.fields.start_time = Some("23:30".into()); request.fields.end_time = Some("24:00".into());
     assert!(ai_tasks::create_task_impl(&state, request).is_ok());
 }
 
@@ -155,13 +172,151 @@ fn v18_upgrade_is_repeatable_and_preserves_existing_schedule() {
     run_migrations(&mut conn).unwrap();
     run_migrations(&mut conn).unwrap();
     let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-    assert_eq!(version, 19);
+    assert_eq!(version, 20);
     assert!(ai_tasks::list_tasks(&conn, "2026-09-29").unwrap().is_empty());
     assert_eq!(serde_json::to_value(daily_schedule::slot_query(&conn, "2026-09-29").unwrap()).unwrap(), before);
     let space = current_space_id(&conn).unwrap();
-    conn.execute("INSERT INTO ai_tasks (space_id,action_id,list_date,title,created_at,updated_at) VALUES (?1,101,'2026-09-29','Persistent',1,1)", params![space]).unwrap();
+    conn.execute("INSERT INTO ai_tasks (space_id,action_id,linked_action_id,list_date,title,created_at,updated_at) VALUES (?1,101,103,'2026-09-29','Legacy snapshot',1,1)", params![space]).unwrap();
     run_migrations(&mut conn).unwrap();
-    assert_eq!(ai_tasks::list_tasks(&conn, "2026-09-29").unwrap()[0].title, "Persistent");
+    assert_eq!(ai_tasks::list_tasks(&conn, "2026-09-29").unwrap()[0].title, "Research");
     let errors: i64 = conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| row.get(0)).unwrap();
     assert_eq!(errors, 0);
+}
+
+#[test]
+fn pool_edits_completion_and_restore_are_shared_and_stale_writes_are_rejected() {
+    let state = state();
+    let task = ai_tasks::create_task_impl(&state, payload()).unwrap();
+    let mut next_day = payload(); next_day.list_date = "2026-09-30".into();
+    ai_tasks::create_task_impl(&state, next_day).unwrap();
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute("UPDATE actions SET title='Renamed',description='Shared notes',updated_at=?1 WHERE id=103",
+            [task.updated_at + 10]).unwrap();
+    }
+    let renamed = ai_tasks::list_tasks(&state.db.lock().unwrap(), "2026-09-29").unwrap().remove(0);
+    assert_eq!(renamed.title, "Renamed");
+    assert_eq!(renamed.notes, "Shared notes");
+    assert!(ai_tasks::update_task_impl(&state, UpdateAiTask { id: task.id, expected_updated_at: task.updated_at, fields: fields() }).is_err());
+    assert!(ai_tasks::delete_task_impl(&state, task.id, task.updated_at).is_err());
+    actions::complete_action_impl(&state, 103).unwrap();
+    for date in ["2026-09-29", "2026-09-30"] {
+        assert_eq!(ai_tasks::list_tasks(&state.db.lock().unwrap(), date).unwrap()[0].status.as_str(), "completed");
+    }
+    actions::restore_action_impl(&state, 103).unwrap();
+    assert_eq!(ai_tasks::list_tasks(&state.db.lock().unwrap(), "2026-09-29").unwrap()[0].status.as_str(), "queued");
+    let fresh = ai_tasks::list_tasks(&state.db.lock().unwrap(), "2026-09-29").unwrap().remove(0);
+    let mut completed = fields(); completed.status = AiTaskStatus::Completed;
+    let done = ai_tasks::update_task_impl(&state, UpdateAiTask { id: fresh.id, expected_updated_at: fresh.updated_at, fields: completed }).unwrap();
+    assert_eq!(ai_tasks::list_tasks(&state.db.lock().unwrap(), "2026-09-30").unwrap()[0].status.as_str(), "completed");
+    ai_tasks::delete_task_impl(&state, done.id, done.updated_at).unwrap();
+    let conn = state.db.lock().unwrap();
+    assert_eq!(conn.query_row("SELECT status FROM actions WHERE id=103", [], |row| row.get::<_, i32>(0)).unwrap(), 1);
+    assert_eq!(conn.query_row("SELECT status FROM actions WHERE id=101", [], |row| row.get::<_, i32>(0)).unwrap(), 0);
+}
+
+#[test]
+fn archived_deleted_or_foreign_pool_actions_cannot_be_attached_or_overwritten() {
+    let state = state();
+    let task = ai_tasks::create_task_impl(&state, payload()).unwrap();
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute("UPDATE events SET status=5 WHERE id=12", []).unwrap();
+    }
+    let archived = ai_tasks::list_tasks(&state.db.lock().unwrap(), "2026-09-29").unwrap().remove(0);
+    assert!(archived.read_only);
+    assert!(ai_tasks::update_task_impl(&state, UpdateAiTask { id: task.id, expected_updated_at: archived.updated_at, fields: fields() }).is_err());
+    let mut request = payload(); request.linked_action_id = 104;
+    assert!(ai_tasks::create_task_impl(&state, request).is_err());
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute("UPDATE events SET status=1 WHERE id=12", []).unwrap();
+        conn.execute("UPDATE actions SET deleted_at=1 WHERE id=104", []).unwrap();
+    }
+    let mut request = payload(); request.linked_action_id = 104;
+    assert!(ai_tasks::create_task_impl(&state, request).is_err());
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute("INSERT INTO local_spaces (space_id,created_at,updated_at) VALUES ('foreign',1,1)", []).unwrap();
+        conn.execute("UPDATE actions SET deleted_at=NULL,space_id='foreign' WHERE id=104", []).unwrap();
+    }
+    let mut request = payload(); request.linked_action_id = 104;
+    assert!(ai_tasks::create_task_impl(&state, request).is_err());
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute("UPDATE actions SET deleted_at=1 WHERE id=103", []).unwrap();
+        assert!(ai_tasks::list_tasks(&conn, "2026-09-29").unwrap().is_empty());
+    }
+    assert!(ai_tasks::update_task_impl(&state, UpdateAiTask { id: task.id, expected_updated_at: task.updated_at, fields: fields() }).is_err());
+}
+
+#[test]
+fn completing_linked_action_and_saving_result_is_atomic() {
+    let state = state();
+    let task = ai_tasks::create_task_impl(&state, payload()).unwrap();
+    state.db.lock().unwrap().execute_batch(
+        "CREATE TRIGGER fail_linked_completion BEFORE UPDATE OF status ON actions
+         WHEN NEW.id=103 BEGIN SELECT RAISE(ABORT,'test write failure'); END;"
+    ).unwrap();
+    let mut changes = fields(); changes.status = AiTaskStatus::Completed; changes.result = "Must roll back".into();
+    assert!(ai_tasks::update_task_impl(&state, UpdateAiTask { id: task.id, expected_updated_at: task.updated_at, fields: changes }).is_err());
+    let current = ai_tasks::list_tasks(&state.db.lock().unwrap(), "2026-09-29").unwrap().remove(0);
+    assert_eq!(current.updated_at, task.updated_at);
+    assert_eq!(current.result, "");
+    assert_eq!(current.status.as_str(), "queued");
+}
+
+fn legacy_v19(conn: &mut Connection) {
+    conn.execute_batch("DROP TABLE ai_tasks;").unwrap();
+    conn.execute_batch(crate::db::migrations::AI_TASKS_MIGRATION).unwrap();
+    conn.pragma_update(None, "user_version", 19).unwrap();
+    let space = current_space_id(conn).unwrap();
+    conn.execute("UPDATE actions SET event_id=NULL WHERE id=102", []).unwrap();
+    conn.execute(
+        "INSERT INTO ai_tasks (id,space_id,action_id,list_date,title,notes,status,result,start_time,end_time,deleted_at,created_at,updated_at)
+         VALUES (1,?1,101,'2026-09-29','Legacy task','Legacy notes','running','Keep result','09:00','10:00',NULL,100,200),
+                (2,?1,101,'2026-09-29','Done','Done notes','completed','Done result',NULL,NULL,NULL,101,201),
+                (3,?1,101,'2026-09-29','Removed','Removed notes','queued','Archived result',NULL,NULL,202,102,202),
+                (4,?1,102,'2026-09-29','Recurring parent','Notes','paused','Result',NULL,NULL,NULL,103,203),
+                (5,?1,102,'2026-09-29','Same recurring parent','Notes','queued','Result',NULL,NULL,NULL,104,204)",
+        [space],
+    ).unwrap();
+}
+
+#[test]
+fn v19_migration_preserves_records_and_creates_pool_actions_exactly_once() {
+    let state = state();
+    let mut conn = state.db.lock().unwrap();
+    legacy_v19(&mut conn);
+    let before = serde_json::to_value(daily_schedule::slot_query(&conn, "2026-09-29").unwrap()).unwrap();
+    run_migrations(&mut conn).unwrap();
+    run_migrations(&mut conn).unwrap();
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM actions", [], |row| row.get::<_, i64>(0)).unwrap(), 9);
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM events", [], |row| row.get::<_, i64>(0)).unwrap(), 3);
+    let tasks = ai_tasks::list_tasks(&conn, "2026-09-29").unwrap();
+    assert_eq!(tasks.len(), 4);
+    assert_eq!(tasks[0].notes, "Legacy notes");
+    assert_eq!(tasks[0].result, "Keep result");
+    assert_eq!(tasks[0].status.as_str(), "running");
+    assert_eq!(tasks[0].start_time.as_deref(), Some("09:00"));
+    assert_eq!(tasks[1].status.as_str(), "completed");
+    assert_eq!(tasks[2].event_title, "历史 AI 任务");
+    assert_eq!(conn.query_row("SELECT event_id FROM actions WHERE id=?1", [tasks[0].linked_action_id], |row| row.get::<_, i64>(0)).unwrap(), 11);
+    assert_eq!(conn.query_row("SELECT a.completed_at FROM actions a JOIN ai_tasks t ON t.linked_action_id=a.id WHERE t.id=2", [], |row| row.get::<_, i64>(0)).unwrap(), 201);
+    assert_eq!(conn.query_row("SELECT a.deleted_at FROM actions a JOIN ai_tasks t ON t.linked_action_id=a.id WHERE t.id=3", [], |row| row.get::<_, i64>(0)).unwrap(), 202);
+    assert_eq!(serde_json::to_value(daily_schedule::slot_query(&conn, "2026-09-29").unwrap()).unwrap(), before);
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+}
+
+#[test]
+fn failed_v19_migration_rolls_back_schema_and_records() {
+    let state = state();
+    let mut conn = state.db.lock().unwrap();
+    legacy_v19(&mut conn);
+    conn.execute_batch("CREATE TRIGGER fail_migration BEFORE INSERT ON actions BEGIN SELECT RAISE(ABORT,'test failure'); END;").unwrap();
+    assert!(run_migrations(&mut conn).is_err());
+    assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i32>(0)).unwrap(), 19);
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM actions", [], |row| row.get::<_, i64>(0)).unwrap(), 4);
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM ai_tasks", [], |row| row.get::<_, i64>(0)).unwrap(), 5);
+    assert!(conn.prepare("SELECT linked_action_id FROM ai_tasks").is_err());
 }

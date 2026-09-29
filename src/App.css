@@ -141,6 +141,8 @@ body.pomodoro-floating-mode .app-shell { padding-top: 0; }
 .daily-ai-task .ant-tag { flex: none; margin: 0; padding-inline: 4px; font-size: 10px; line-height: 17px; }
 .daily-ai-editor-title { display: inline-flex; align-items: center; gap: 8px; }
 .daily-ai-parent { display: grid; gap: 6px; margin-bottom: 22px; overflow-wrap: anywhere; }
+.daily-ai-source-link { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.daily-ai-source-notes { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow-y: auto; }
 .daily-ai-time-fields { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 14px; }
 .daily-ai-editor-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .daily-ai-editor-footer > .ant-space { margin-left: auto; }

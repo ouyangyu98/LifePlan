@@ -261,6 +261,9 @@ impl AiTaskStatus {
 pub struct AiTask {
     pub id: i64,
     pub action_id: i64,
+    pub linked_action_id: i64,
+    pub event_title: String,
+    pub read_only: bool,
     pub list_date: String,
     pub title: String,
     pub status: AiTaskStatus,
@@ -274,17 +277,16 @@ pub struct AiTask {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiTaskFields {
-    pub title: String,
     pub status: AiTaskStatus,
     pub start_time: Option<String>,
     pub end_time: Option<String>,
-    pub notes: String,
     pub result: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewAiTask {
     pub action_id: i64,
+    pub linked_action_id: i64,
     pub list_date: String,
     #[serde(flatten)]
     pub fields: AiTaskFields,
