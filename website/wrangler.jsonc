@@ -1,0 +1,10 @@
+{
+  "name": "lifeplan-website",
+  "main": "./worker.mjs",
+  "compatibility_date": "2026-09-29",
+  "assets": { "directory": "./dist", "binding": "ASSETS", "run_worker_first": true },
+  "routes": [
+    { "pattern": "ouyangyu.tech/life", "zone_name": "ouyangyu.tech" },
+    { "pattern": "ouyangyu.tech/life/*", "zone_name": "ouyangyu.tech" }
+  ]
+}

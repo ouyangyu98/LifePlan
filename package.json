@@ -7,6 +7,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "website:dev": "vite --config website/vite.config.ts",
+    "website:check": "tsc -p website/tsconfig.json",
+    "website:build": "vite build --config website/vite.config.ts",
     "tauri": "tauri",
     "test:release": "node --test tests/release/release-utils.test.mjs"
   },
