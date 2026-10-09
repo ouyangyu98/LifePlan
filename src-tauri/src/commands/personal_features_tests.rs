@@ -1,4 +1,4 @@
-use super::{actions, daily_list, daily_schedule, event_categories as categories, events, insights};
+use super::{actions, daily_list, daily_schedule, event_categories as categories, events, insights, weekly_summary};
 use crate::db::{current_space_id, ensure_current_space, migrations, run_migrations, AppState};
 use crate::models::*;
 use rusqlite::{params, Connection};
@@ -382,4 +382,91 @@ fn drag_rolls_back_first_write_when_second_write_fails() {
     ).unwrap();
     assert!(daily_schedule::move_slot_action_impl(&state, "2026-09-28", 201, 202).is_err());
     assert_eq!(drag_snapshot(&state), before);
+}
+
+#[test]
+fn weekly_summary_uses_planned_main_action_time_and_keeps_notes_per_week() {
+    let state = state();
+    let work = category(&state, "Work");
+    let growth = category(&state, "Growth");
+    let work_event = event(&state, Some(work.id));
+    let growth_event = event(&state, Some(growth.id));
+    state.db.lock().unwrap().execute(
+        "UPDATE events SET status=1 WHERE id IN (?1,?2)",
+        params![work_event.id, growth_event.id],
+    ).unwrap();
+    let work_action = actions::create_action_impl(&state, serde_json::from_value(json!({
+        "event_id": work_event.id, "title": "Work action", "estimated_hours": 1, "is_frog": 0
+    })).unwrap()).unwrap();
+    let growth_action = actions::create_action_impl(&state, serde_json::from_value(json!({
+        "event_id": growth_event.id, "title": "Growth action", "estimated_hours": 1, "is_frog": 0
+    })).unwrap()).unwrap();
+    let uncategorized_action = actions::create_action_impl(&state, serde_json::from_value(json!({
+        "title": "Personal action", "estimated_hours": 1, "is_frog": 0
+    })).unwrap()).unwrap();
+    let ignored_action = actions::create_action_impl(&state, serde_json::from_value(json!({
+        "title": "Deleted action", "estimated_hours": 1, "is_frog": 0
+    })).unwrap()).unwrap();
+    let space = current_space_id(&state.db.lock().unwrap()).unwrap();
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute(
+            "INSERT INTO daily_schedule_slots
+             (space_id,list_date,start_time,end_time,action_id,sort_order,created_at,updated_at)
+             VALUES (?1,'2026-09-28','09:00','10:00',?2,0,1,1),
+                    (?1,'2026-09-29','10:00','11:30',?3,1,1,1),
+                    (?1,'2026-10-04','23:00','24:00',?4,2,1,1),
+                    (?1,'2026-10-04','12:00','13:00',?5,3,1,1),
+                    (?1,'2026-10-05','09:00','10:00',?2,4,1,1)",
+            params![space, work_action.id, growth_action.id, uncategorized_action.id, ignored_action.id],
+        ).unwrap();
+        conn.execute("UPDATE actions SET deleted_at=2 WHERE id=?1", [ignored_action.id]).unwrap();
+    }
+
+    let summary = weekly_summary::read_summary(&state.db.lock().unwrap(), "2026-09-28").unwrap();
+    assert_eq!(summary.total_minutes, 210);
+    assert_eq!(summary.categories.iter().map(|category| category.percentage).sum::<f64>(), 100.0);
+    assert_eq!(
+        summary.categories.iter().map(|category| (&category.name, category.minutes)).collect::<Vec<_>>(),
+        vec![(&"Growth".to_string(), 90), (&"未分类".to_string(), 60), (&"Work".to_string(), 60)]
+    );
+    assert!(weekly_summary::read_summary(&state.db.lock().unwrap(), "2026-09-27").is_err());
+    assert!(weekly_summary::read_summary(&state.db.lock().unwrap(), "2026-09-xx").is_err());
+
+    let saved = weekly_summary::save_note_impl(&state, "2026-09-28".into(), "# Keep\n\nThought".into(), space.clone()).unwrap();
+    assert_eq!(saved.content, "# Keep\n\nThought");
+    weekly_summary::save_note_impl(&state, "2026-09-14".into(), "Older thought".into(), space.clone()).unwrap();
+    let records = weekly_summary::list_records(&state.db.lock().unwrap(), None, 12).unwrap();
+    assert_eq!(records.iter().map(|record| record.week_start.as_str()).collect::<Vec<_>>(), vec!["2026-10-05", "2026-09-28", "2026-09-14"]);
+    assert_eq!(records[0].content, "");
+    assert_eq!(records[1].total_minutes, 210);
+
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute("INSERT INTO local_spaces (space_id,created_at,updated_at) VALUES ('other',1,1)", []).unwrap();
+        conn.execute("UPDATE settings SET value='other' WHERE key='current_space_id'", []).unwrap();
+        assert_eq!(weekly_summary::read_summary(&conn, "2026-09-28").unwrap().total_minutes, 0);
+        assert!(weekly_summary::list_records(&conn, None, 12).unwrap().is_empty());
+    }
+    assert!(weekly_summary::save_note_impl(&state, "2026-09-28".into(), "Wrong space".into(), space).is_err());
+}
+
+#[test]
+fn weekly_summary_v23_migration_is_repeatable_and_preserves_existing_data() {
+    let mut conn = Connection::open_in_memory().unwrap();
+    run_migrations(&mut conn).unwrap();
+    let space = ensure_current_space(&mut conn).unwrap();
+    conn.execute(
+        "INSERT INTO events (space_id,sync_id,title,status,created_at,updated_at)
+         VALUES (?1,'weekly-migration-event','Keep me',1,1,2)",
+        [&space],
+    ).unwrap();
+    conn.execute_batch("DROP TABLE weekly_notes;").unwrap();
+    conn.pragma_update(None, "user_version", 23).unwrap();
+    run_migrations(&mut conn).unwrap();
+    run_migrations(&mut conn).unwrap();
+    assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i32>(0)).unwrap(), migrations::CURRENT_SCHEMA_VERSION);
+    assert_eq!(conn.query_row("SELECT title FROM events WHERE sync_id='weekly-migration-event'", [], |row| row.get::<_, String>(0)).unwrap(), "Keep me");
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM weekly_notes", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
 }

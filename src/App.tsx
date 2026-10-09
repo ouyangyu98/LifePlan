@@ -29,6 +29,7 @@ const chineseCalendarLocale = {
 import Layout from "@/components/layout/Layout";
 import Inbox from "@/pages/Inbox";
 import Insights from "@/pages/Insights";
+import WeeklySummary from "@/pages/WeeklySummary";
 import DailyList from "@/pages/DailyList";
 import Pomodoro from "@/pages/Pomodoro";
 import Rewards from "@/pages/Rewards";
@@ -109,10 +110,9 @@ function AppContent() {
       action={notice.kind === "backup_warning" ? <Button size="small" loading={retrying} onClick={() => void retryBackup()}>立即重试</Button> : undefined}
     />}
     {showOnboarding && <OnboardingCarousel onFinish={() => setShowOnboarding(false)} />}
-    <HashRouter><Routes><Route path="/" element={<Layout />}><Route index element={<Navigate to="/daily-list" replace />} /><Route path="daily-list" element={<DailyList />} /><Route path="pomodoro" element={<OptionalFeature feature="pomodoro"><Pomodoro /></OptionalFeature>} /><Route path="rewards" element={<OptionalFeature feature="rewards"><Rewards /></OptionalFeature>} /><Route path="inbox" element={<Inbox />} /><Route path="insights" element={<OptionalFeature feature="insights"><Insights /></OptionalFeature>} /><Route path="settings" element={<Settings />} /></Route></Routes></HashRouter>
+    <HashRouter><Routes><Route path="/" element={<Layout />}><Route index element={<Navigate to="/daily-list" replace />} /><Route path="daily-list" element={<DailyList />} /><Route path="pomodoro" element={<OptionalFeature feature="pomodoro"><Pomodoro /></OptionalFeature>} /><Route path="rewards" element={<OptionalFeature feature="rewards"><Rewards /></OptionalFeature>} /><Route path="inbox" element={<Inbox />} /><Route path="insights" element={<OptionalFeature feature="insights"><Insights /></OptionalFeature>} /><Route path="weekly-summary" element={<OptionalFeature feature="weeklySummary"><WeeklySummary /></OptionalFeature>} /><Route path="settings" element={<Settings />} /></Route></Routes></HashRouter>
   </ConfigProvider>;
 }
-
 
 
 

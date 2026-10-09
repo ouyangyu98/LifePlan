@@ -77,6 +77,33 @@ pub struct InsightsNote {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeeklyCategoryDuration {
+    pub id: Option<i64>,
+    pub name: String,
+    pub color: String,
+    pub minutes: i64,
+    pub percentage: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeeklySummary {
+    pub space_id: String,
+    pub week_start: String,
+    pub content: String,
+    pub updated_at: i64,
+    pub total_minutes: i64,
+    pub categories: Vec<WeeklyCategoryDuration>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeeklyRecord {
+    pub week_start: String,
+    pub content: String,
+    pub updated_at: i64,
+    pub total_minutes: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessEvent {
     pub event_id: i64,
     pub decision: String,

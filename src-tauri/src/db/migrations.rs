@@ -1,4 +1,14 @@
-pub const CURRENT_SCHEMA_VERSION: i32 = 23;
+pub const CURRENT_SCHEMA_VERSION: i32 = 24;
+
+pub const WEEKLY_SUMMARIES_MIGRATION: &str = r#"
+CREATE TABLE IF NOT EXISTS weekly_notes (
+    space_id TEXT NOT NULL REFERENCES local_spaces(space_id),
+    week_start TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(space_id, week_start)
+);
+"#;
 
 pub const AI_TASKS_MIGRATION: &str = r#"
 CREATE TABLE IF NOT EXISTS ai_tasks (
@@ -51,6 +61,13 @@ CREATE TABLE IF NOT EXISTS insights_notes (
     space_id TEXT PRIMARY KEY REFERENCES local_spaces(space_id),
     content TEXT NOT NULL DEFAULT '',
     updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS weekly_notes (
+    space_id TEXT NOT NULL REFERENCES local_spaces(space_id),
+    week_start TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(space_id, week_start)
 );
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

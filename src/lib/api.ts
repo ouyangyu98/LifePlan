@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { AiTask, NewAiTask, UpdateAiTask } from "@/types";
-import type { Action, EventCategory, EventCompletionCheck, RewardCheckin, AddDailyListItem, DailyListItem, DailySchedule, DailyScheduleSlot, DailyTemplateSlot, Event, InsightsNote, NewAction, NewEvent, NewEventCategory, NewDailySlot, NewRecurringAction, ProcessEvent, RecurringAction, ReorderDailyList, ReorderEventActions, ReorderRecurringActions, StartupNotice, UpdateAction, UpdateDailySlot, UpdateDailySlotReview, UpdateEvent, UpdateEventCategory, PomodoroRecord, PomodoroStatus, NewReward, Reward, RewardsOverview, UpdateReward, UpdateRecurringAction } from "@/types";
+import type { Action, EventCategory, EventCompletionCheck, RewardCheckin, AddDailyListItem, DailyListItem, DailySchedule, DailyScheduleSlot, DailyTemplateSlot, Event, InsightsNote, NewAction, NewEvent, NewEventCategory, NewDailySlot, NewRecurringAction, ProcessEvent, RecurringAction, ReorderDailyList, ReorderEventActions, ReorderRecurringActions, StartupNotice, UpdateAction, UpdateDailySlot, UpdateDailySlotReview, UpdateEvent, UpdateEventCategory, PomodoroRecord, PomodoroStatus, NewReward, Reward, RewardsOverview, UpdateReward, UpdateRecurringAction, WeeklyRecord, WeeklySummary } from "@/types";
 
 type TauriWindow = Window & {
   __TAURI_INTERNALS__?: {
@@ -42,6 +42,12 @@ export const eventCategoriesApi = {
 export const insightsApi = {
   get: () => invokeCommand<InsightsNote>("get_insights_note"),
   save: (content: string, spaceId: string) => invokeCommand<InsightsNote>("save_insights_note", { content, spaceId }),
+};
+
+export const weeklySummaryApi = {
+  get: (weekStart: string) => invokeCommand<WeeklySummary>("get_weekly_summary", { weekStart }),
+  save: (weekStart: string, content: string, spaceId: string) => invokeCommand<WeeklySummary>("save_weekly_note", { weekStart, content, spaceId }),
+  list: (beforeWeekStart?: string, limit = 12) => invokeCommand<WeeklyRecord[]>("list_weekly_records", { beforeWeekStart: beforeWeekStart ?? null, limit }),
 };
 
 export const actionsApi = {

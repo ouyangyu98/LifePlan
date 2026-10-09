@@ -78,6 +78,9 @@ export interface EventCategory {
 export interface NewEventCategory { name: string; color: string }
 export type UpdateEventCategory = NewEventCategory & { id: number };
 export interface InsightsNote { space_id: string; content: string; updated_at: number }
+export interface WeeklyCategoryDuration { id: number | null; name: string; color: string; minutes: number; percentage: number }
+export interface WeeklySummary { space_id: string; week_start: string; content: string; updated_at: number; total_minutes: number; categories: WeeklyCategoryDuration[] }
+export interface WeeklyRecord { week_start: string; content: string; updated_at: number; total_minutes: number }
 
 export interface ProcessEvent {
   event_id: number;

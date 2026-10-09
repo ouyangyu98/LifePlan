@@ -1,6 +1,6 @@
 use crate::commands::{
     actions, ai_tasks, analytics, daily_list, daily_schedule, event_categories, events, insights, pomodoro,
-    recurring_actions, rewards, system,
+    recurring_actions, rewards, system, weekly_summary,
 };
 use crate::db::init_db;
 pub use crate::db::AppState;
@@ -180,6 +180,9 @@ pub fn run() {
             event_categories::delete_event_category,
             insights::get_insights_note,
             insights::save_insights_note,
+            weekly_summary::get_weekly_summary,
+            weekly_summary::save_weekly_note,
+            weekly_summary::list_weekly_records,
             actions::get_actions,
             actions::create_action,
             actions::update_action,

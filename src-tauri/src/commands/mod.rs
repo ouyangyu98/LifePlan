@@ -10,6 +10,7 @@ pub mod pomodoro;
 pub mod recurring_actions;
 pub mod rewards;
 pub mod system;
+pub mod weekly_summary;
 
 #[cfg(test)]
 mod legacy_priority_tests;

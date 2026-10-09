@@ -136,6 +136,7 @@ pub fn run_migrations(conn: &mut Connection) -> Result<bool, DbError> {
         ai_task_slots::migrate(conn)?;
         migrate_event_delay_resume(conn)?;
         migrate_ai_slot_uniqueness(conn)?;
+        migrate_weekly_summaries(conn)?;
         return Ok(true);
     }
     if version == 15 {
@@ -176,6 +177,9 @@ pub fn run_migrations(conn: &mut Connection) -> Result<bool, DbError> {
         migrate_ai_slot_uniqueness(conn)?;
     }
     if (18..=23).contains(&upgraded_version) {
+        migrate_weekly_summaries(conn)?;
+    }
+    if (18..=24).contains(&upgraded_version) {
         validate_current_schema(conn)?;
         conn.prepare("SELECT delay_resume_status FROM events LIMIT 0")?;
         conn.prepare("SELECT id,space_id,action_id,linked_action_id,slot_id,list_date,title,status,start_time,end_time,notes,result,deleted_at,created_at,updated_at FROM ai_tasks LIMIT 0")
@@ -185,6 +189,14 @@ pub fn run_migrations(conn: &mut Connection) -> Result<bool, DbError> {
     Err(DbError::MigrationFailed(format!(
         "不支持从数据库版本 v{version} 升级；项目概念及其历史数据兼容已移除，请使用 v15 数据库或重新初始化。"
     )))
+}
+
+fn migrate_weekly_summaries(conn: &mut Connection) -> Result<(), DbError> {
+    let tx = conn.transaction()?;
+    tx.execute_batch(migrations::WEEKLY_SUMMARIES_MIGRATION)?;
+    tx.pragma_update(None, "user_version", 24)?;
+    tx.commit()?;
+    Ok(())
 }
 
 fn migrate_ai_slot_uniqueness(conn: &mut Connection) -> Result<(), DbError> {
@@ -414,6 +426,7 @@ fn validate_current_schema(conn: &Connection) -> Result<(), DbError> {
             ][..],
         ),
         ("insights_notes", &["space_id", "content", "updated_at"][..]),
+        ("weekly_notes", &["space_id", "week_start", "content", "updated_at"][..]),
         ("settings", &["key", "value", "updated_at"][..]),
         (
             "events",

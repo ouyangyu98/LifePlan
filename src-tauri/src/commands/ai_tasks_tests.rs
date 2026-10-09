@@ -157,7 +157,7 @@ fn v22_upgrade_preserves_records_and_allows_cross_slot_attachments() {
         run_migrations(&mut conn).unwrap();
         assert_eq!(serde_json::to_value(ai_tasks::list_tasks(&conn, "2026-09-29").unwrap()).unwrap(), before);
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM ai_tasks", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
-        assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i32>(0)).unwrap(), 23);
+        assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i32>(0)).unwrap(), crate::db::migrations::CURRENT_SCHEMA_VERSION);
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
     }
     let mut second = payload(); second.slot_id = 202;
