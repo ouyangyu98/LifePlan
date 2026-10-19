@@ -128,8 +128,8 @@ pub(super) fn create_action_impl(state: &AppState, payload: NewAction) -> Result
                 |r| r.get(0),
             )
             .map_err(|e| e.to_string())?;
-        if status != 1 {
-            return Err("只有进行中的事件可以新增行动".into());
+        if ![0, 1].contains(&status) {
+            return Err("只有待梳理或进行中的事件可以新增行动".into());
         }
     }
     let now = now_millis();
@@ -263,6 +263,13 @@ pub fn reorder_event_actions(
     state: State<'_, AppState>,
     payload: ReorderEventActions,
 ) -> Result<(), String> {
+    reorder_event_actions_impl(&state, payload)
+}
+
+pub(super) fn reorder_event_actions_impl(
+    state: &AppState,
+    payload: ReorderEventActions,
+) -> Result<(), String> {
     let mut seen = HashSet::new();
     if payload.action_ids.iter().any(|id| !seen.insert(*id)) {
         return Err("行动排序列表包含重复行动".into());
@@ -278,8 +285,8 @@ pub fn reorder_event_actions(
         )
         .optional()
         .map_err(|e| e.to_string())?;
-    if event_status != Some(1) {
-        return Err("只有进行中的事件可以调整行动顺序".into());
+    if !matches!(event_status, Some(0 | 1)) {
+        return Err("只有待梳理或进行中的事件可以调整行动顺序".into());
     }
     for (i, id) in payload.action_ids.iter().enumerate() {
         if tx.execute("UPDATE actions SET sort_order=?1,updated_at=?2 WHERE id=?3 AND event_id=?4 AND space_id=?5 AND deleted_at IS NULL", params![i as i64 + 1, now_millis(), id, payload.event_id, space]).map_err(|e| e.to_string())? == 0 { return Err("行动不属于当前事件".into()); }

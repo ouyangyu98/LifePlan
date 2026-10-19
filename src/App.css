@@ -48,13 +48,13 @@ body.pomodoro-floating-mode .app-shell { padding-top: 0; }
 .daily-title-line .page-title { margin: 0; }
 .daily-pool-trigger.ant-btn { height: 32px; padding-inline: 10px; font-size: 12px; border-color: #dfe5eb; box-shadow: none; }
 .daily-pool-trigger-count { margin-inline: 4px; color: #7a8591; font-size: 11px; }
-.daily-event-pool { padding: 12px 0 16px; margin-bottom: 14px; border-block: 1px solid #dfe5eb; }
+.daily-event-pool { position: sticky; top: 0; z-index: 4; flex: 0 0 auto; padding: 12px 0 16px; margin-bottom: 14px; border-block: 1px solid #dfe5eb; background: #f5f7fa; box-shadow: 0 6px 10px -10px rgba(37, 51, 66, .35); }
 .daily-pool-heading, .daily-pool-heading > div { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .daily-pool-heading { justify-content: space-between; margin-bottom: 12px; }
 .daily-pool-heading strong { color: #394857; font-size: 13px; }
 .daily-pool-progress-label { font-size: 12px; color: #637283; font-variant-numeric: tabular-nums; }
 .daily-pool-heading .ant-progress { width: 90px; min-width: 60px; margin: 0; }
-.daily-pool-events { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; max-height: 260px; overflow-y: auto; padding-right: 4px; }
+.daily-pool-events { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; max-height: min(260px, max(80px, calc(45dvh - 100px))); overflow-y: auto; padding-right: 4px; }
 .daily-pool-event { min-width: 0; border: 1px solid #e3e8ed; border-radius: 6px; background: #fff; }
 .daily-pool-event-heading { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 8px; border-bottom: 1px solid #edf0f3; }
 .daily-pool-event-name { flex: 1 1 60px; min-width: 0; color: #394857; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
@@ -72,7 +72,18 @@ body.pomodoro-floating-mode .app-shell { padding-top: 0; }
 .daily-pool-scheduled { color: #8c98a5; font-size: 10px; white-space: nowrap; }
 .daily-pool-no-actions, .daily-pool-empty { display: block; padding: 12px; color: #8c98a5; font-size: 12px; }
 .daily-pool-picker { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; padding: 14px 0; }
-.daily-pool-picker .ant-checkbox-wrapper { padding: 8px; margin: 0; border-bottom: 1px solid #edf0f3; align-items: start; }
+.daily-pool-picker-event { padding-block: 6px 10px; border-bottom: 1px solid #edf0f3; }
+.daily-pool-picker-event-heading { display: flex; gap: 8px; align-items: center; }
+.daily-pool-picker-event-heading .ant-checkbox-wrapper { flex: 1; min-width: 0; padding: 4px 0; margin: 0; align-items: start; }
+.daily-pool-picker-event-heading .ant-btn { flex: none; }
+.daily-pool-picker-actions { display: grid; gap: 8px; list-style: none; padding: 6px 0 0 24px; margin: 0; }
+.daily-pool-picker-actions li { display: flex; align-items: start; gap: 8px; color: #637283; font-size: 12px; line-height: 1.6; }
+.daily-pool-picker-actions li > svg { flex: none; margin-top: 3px; color: #9aa5b1; }
+.daily-pool-picker-actions li > svg.is-completed { color: #16846c; }
+.daily-pool-picker-action-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.daily-pool-picker-action-name.is-inactive { color: #9aa5b1; }
+.daily-pool-picker-no-actions { display: block; padding: 6px 0 0 24px; color: #9aa5b1; font-size: 12px; }
+.daily-pool-picker-actions .ant-tag { flex: none; margin: 0; font-size: 11px; }
 .daily-pool-picker .ant-checkbox-label { overflow-wrap: anywhere; min-width: 0; }
 .daily-pool-picker .ant-tag { margin-inline: 6px 0; }
 @media (max-width: 760px) {

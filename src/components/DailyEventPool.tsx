@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Empty, Input, Modal, Progress, Select, Tag, Tooltip } from "antd";
-import { CalendarPlus, ChevronUp, GripVertical, Plus, Search, Unlink } from "lucide-react";
-import { dailyEventPoolApi, eventsApi } from "@/lib/api";
+import { CalendarPlus, ChevronDown, ChevronUp, Circle, CircleCheck, GripVertical, Plus, Search, Unlink } from "lucide-react";
+import { actionsApi, dailyEventPoolApi, eventsApi } from "@/lib/api";
 import { userFacingError } from "@/lib/errors";
 import type { Action, DailyEventPool as Pool, DailySchedule, DailyScheduleSlot, Event } from "@/types";
 
@@ -57,6 +57,8 @@ export default function DailyEventPool({ pool, slots, assigning, onClose, onDrag
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [events, setEvents] = useState<Event[]>([]);
+  const [pickerActions, setPickerActions] = useState<Action[]>([]);
+  const [collapsedEvents, setCollapsedEvents] = useState<Set<number>>(() => new Set());
   const [query, setQuery] = useState("");
   const [chosen, setChosen] = useState<number[]>([]);
   const [pickerError, setPickerError] = useState("");
@@ -82,17 +84,28 @@ export default function DailyEventPool({ pool, slots, assigning, onClose, onDrag
   const openPicker = async () => {
     const request = ++pickerRequest.current;
     setPickerOpen(true); setPickerLoading(true); setPickerError(""); setChosen([]); setQuery("");
+    setEvents([]); setPickerActions([]); setCollapsedEvents(new Set());
     try {
-      const next = await eventsApi.list();
-      if (request === pickerRequest.current) setEvents(next.filter((event) => event.status === 1));
+      const [next, actions] = await Promise.all([eventsApi.list(), actionsApi.list()]);
+      if (request === pickerRequest.current) {
+        setEvents(next.filter((event) => event.status === 1));
+        setPickerActions(actions);
+      }
     } catch (cause) {
       if (request === pickerRequest.current) setPickerError(userFacingError(cause));
     } finally { if (request === pickerRequest.current) setPickerLoading(false); }
   };
   const emptySlots = slots.filter((slot) => !slot.action_id && !slot.actual_notes?.trim() && slot.focused == null && slot.met_expectation == null);
   const entries = pool.data?.entries ?? [];
-  const availableEvents = events.filter((event) => !pool.data?.event_ids.includes(event.id)
-    && [event.title, event.category_name].some((value) => value?.toLowerCase().includes(query.trim().toLowerCase())));
+  const queryText = query.trim().toLowerCase();
+  const availableEvents = events.filter((event) => !pool.data?.event_ids.includes(event.id))
+    .map((event) => ({
+      event,
+      actions: pickerActions.filter((action) => action.event_id === event.id)
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.id - b.id),
+    }))
+    .filter(({ event, actions }) => [event.title, event.category_name, ...actions.map((action) => action.title)]
+      .some((value) => value?.toLowerCase().includes(queryText)));
   const percent = pool.total ? Math.round(pool.completed / pool.total * 100) : 0;
   return <section id="daily-event-pool" className="daily-event-pool" aria-label="今日事件池">
     <header className="daily-pool-heading">
@@ -146,17 +159,44 @@ export default function DailyEventPool({ pool, slots, assigning, onClose, onDrag
       })}</div>}
     <Modal open={pickerOpen} title="添加事件到今日池" onCancel={() => setPickerOpen(false)} destroyOnHidden
       okText="添加到今日池" cancelText="取消" confirmLoading={pool.saving}
-      okButtonProps={{ disabled: !chosen.length || pickerLoading || Boolean(pickerError) }}
+      okButtonProps={{ disabled: !chosen.length || pickerLoading || Boolean(pickerError) || Boolean(pool.error) }}
       onOk={() => void pool.save([...pool.data!.event_ids, ...chosen]).then(() => setPickerOpen(false)).catch(() => undefined)}>
       {pickerError && <Alert type="error" showIcon message={pickerError} action={<Button onClick={() => void openPicker()}>重试</Button>} />}
-      <Input aria-label="搜索事件" placeholder="搜索事件或分类" prefix={<Search size={14} />} value={query} allowClear onChange={(event) => setQuery(event.target.value)} />
+      <Input aria-label="搜索事件" placeholder="搜索事件、行动或分类" prefix={<Search size={14} />} value={query} allowClear
+        onChange={(event) => { setQuery(event.target.value); setCollapsedEvents(new Set()); }} />
       <div className="daily-pool-picker">
-        {pickerLoading ? "正在加载…" : availableEvents.map((event) =>
-          <Checkbox key={event.id} checked={chosen.includes(event.id)} onChange={(value) =>
-            setChosen((current) => value.target.checked ? [...current, event.id] : current.filter((id) => id !== event.id))}>
-            <span>{event.title}</span>{event.category_name && <Tag color={event.category_color}>{event.category_name}</Tag>}
-          </Checkbox>)}
-        {!pickerLoading && availableEvents.length === 0
+        {pickerLoading ? "正在加载…" : !pickerError && availableEvents.map(({ event, actions }) =>
+          <div className="daily-pool-picker-event" key={event.id}>
+            <div className="daily-pool-picker-event-heading">
+              <Checkbox aria-label={`添加事件：${event.title}`} checked={chosen.includes(event.id)} disabled={pool.saving}
+                onChange={(value) => setChosen((current) => value.target.checked ? [...current, event.id] : current.filter((id) => id !== event.id))}>
+                <span>{event.title}</span>{event.category_name && <Tag color={event.category_color}>{event.category_name}</Tag>}
+              </Checkbox>
+              <Tooltip title={collapsedEvents.has(event.id) ? "展开二级行动" : "收起二级行动"}>
+                <Button type="text" size="small" aria-label={`${collapsedEvents.has(event.id) ? "展开" : "收起"}二级行动：${event.title}`}
+                  aria-expanded={!collapsedEvents.has(event.id)} aria-controls={`daily-pool-picker-actions-${event.id}`}
+                  icon={collapsedEvents.has(event.id) ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+                  onClick={() => setCollapsedEvents((current) => {
+                    const next = new Set(current);
+                    if (next.has(event.id)) next.delete(event.id); else next.add(event.id);
+                    return next;
+                  })} />
+              </Tooltip>
+            </div>
+            <div id={`daily-pool-picker-actions-${event.id}`} hidden={collapsedEvents.has(event.id)}>
+              {actions.length === 0 ? <span className="daily-pool-picker-no-actions">暂无二级行动</span> :
+                <ul className="daily-pool-picker-actions" aria-label={`${event.title}的二级行动`}>
+                  {actions.map((action) => <li key={action.id}>
+                    {action.status === 1 ? <CircleCheck size={14} className="is-completed" aria-hidden="true" /> : <Circle size={14} aria-hidden="true" />}
+                    <span className={`daily-pool-picker-action-name${action.status !== 0 ? " is-inactive" : ""}`}>{action.title}</span>
+                    <Tag color={action.status === 1 ? "green" : action.status === 2 ? "default" : "blue"}>
+                      {action.status === 1 ? "已完成" : action.status === 2 ? "已放弃" : "待办"}
+                    </Tag>
+                  </li>)}
+                </ul>}
+            </div>
+          </div>)}
+        {!pickerLoading && !pickerError && availableEvents.length === 0
           && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可添加的进行中事件" />}
       </div>
       <Button type="link" onClick={onOpenInbox}>去事件篮</Button>

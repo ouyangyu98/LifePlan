@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AiTask, NewAiTask, UpdateAiTask, DailyEventPool } from "@/types";
+import type { AiTask, NewAiTask, UpdateAiTask, DailyEventPool, WeeklyAction } from "@/types";
 import type { Action, EventCategory, EventCompletionCheck, RewardCheckin, AddDailyListItem, DailyListItem, DailySchedule, DailyScheduleSlot, DailyTemplateSlot, Event, InsightsNote, NewAction, NewEvent, NewEventCategory, NewDailySlot, NewRecurringAction, ProcessEvent, RecurringAction, ReorderDailyList, ReorderEventActions, ReorderRecurringActions, StartupNotice, UpdateAction, UpdateDailySlot, UpdateDailySlotReview, UpdateEvent, UpdateEventCategory, PomodoroRecord, PomodoroStatus, NewReward, Reward, RewardsOverview, UpdateReward, UpdateRecurringAction, WeeklyRecord, WeeklySummary } from "@/types";
 
 type TauriWindow = Window & {
@@ -25,6 +25,7 @@ export const systemApi = {
 export const eventsApi = {
   list: () => invokeCommand<Event[]>("get_events"),
   create: (payload: NewEvent) => invokeCommand<Event>("create_event", { payload }),
+  start: (eventId: number) => invokeCommand<void>("start_event", { eventId }),
   update: (payload: UpdateEvent) => invokeCommand<Event>("update_event", { payload }),
   process: (payload: ProcessEvent) => invokeCommand<void>("process_event", { payload }),
   complete: (eventId: number) => invokeCommand<EventCompletionCheck>("complete_event", { eventId }),
@@ -45,6 +46,7 @@ export const insightsApi = {
 };
 
 export const weeklySummaryApi = {
+  dailyItems: (listDate: string) => invokeCommand<WeeklyAction[]>("get_daily_activity_items", { listDate }),
   get: (weekStart: string) => invokeCommand<WeeklySummary>("get_weekly_summary", { weekStart }),
   save: (weekStart: string, content: string, spaceId: string) => invokeCommand<WeeklySummary>("save_weekly_note", { weekStart, content, spaceId }),
   list: (beforeWeekStart?: string, limit = 12) => invokeCommand<WeeklyRecord[]>("list_weekly_records", { beforeWeekStart: beforeWeekStart ?? null, limit }),

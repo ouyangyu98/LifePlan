@@ -15,10 +15,14 @@ test("daily event pool saves per day, drags copies safely, tracks progress and p
   page.setDefaultTimeout(8000);
   await page.clock.install({ time: new Date("2026-10-19T12:00:00") });
   const errors = [];
+  const keyWarnings = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (/same key|unique.*key/.test(message.text())) keyWarnings.push(message.text());
+  });
   await page.addInitScript(() => {
     localStorage.setItem("lifeplan-onboarding-v1-completed", "1");
-    localStorage.setItem("lifeplan-optional-features-v1", JSON.stringify({ aiParallel: false, dailyStatistics: false, reviewExpectation: false }));
+    localStorage.setItem("lifeplan-optional-features-v1", JSON.stringify({ aiParallel: false, dailyStatistics: true, reviewExpectation: false }));
     const initial = {
       actions: [
         { id: 1, event_id: 10, event_title: "直播清晰度", title: "需求文档", status: 0 },
@@ -140,6 +144,17 @@ test("daily event pool saves per day, drags copies safely, tracks progress and p
     await trigger.getByText("0 事件 · 0/0", { exact: true }).waitFor();
     assert.equal(await trigger.getAttribute("aria-expanded"), "false");
     assert.equal(await pool.count(), 0);
+    await page.getByRole("region", { name: "数据统计", exact: true }).waitFor();
+    const originalSchedule = await page.evaluate(() => JSON.stringify(window.poolFixture.slots));
+    for (let index = 0; index < 10; index += 1) {
+      await trigger.click();
+      assert.equal(await page.locator("#daily-event-pool").count(), 1);
+      await pool.getByText("尚未添加事件", { exact: true }).waitFor();
+      await trigger.click();
+      assert.equal(await page.locator("#daily-event-pool").count(), 0);
+      assert.equal(await page.locator(".daily-statistics").count(), 1);
+    }
+    assert.equal(await page.evaluate(() => JSON.stringify(window.poolFixture.slots)), originalSchedule);
     assert.equal(await page.locator(".daily-schedule-head").evaluate((el) => {
       const columns = [...el.children].map((child) => child.getBoundingClientRect().width);
       return columns[1] > columns[2];
@@ -147,12 +162,37 @@ test("daily event pool saves per day, drags copies safely, tracks progress and p
     await trigger.click();
     await pool.getByText("尚未添加事件", { exact: true }).waitFor();
     await pool.getByRole("button", { name: "添加事件", exact: true }).click();
+    const childActions = dialog.getByRole("list", { name: "直播清晰度的二级行动", exact: true });
+    await childActions.getByText("需求文档", { exact: true }).waitFor();
+    await childActions.getByText("确认异常规则", { exact: true }).waitFor();
+    await childActions.getByText("已完成调研", { exact: true }).waitFor();
+    assert.deepEqual(await childActions.locator(".ant-tag").allTextContents(), ["待办", "待办", "已完成"]);
+    await shot("daily-pool-picker-hierarchy.png");
+    await dialog.getByRole("button", { name: "收起二级行动：直播清晰度", exact: true }).click();
+    await childActions.waitFor({ state: "hidden" });
+    await dialog.getByRole("button", { name: "展开二级行动：直播清晰度", exact: true }).click();
+    await childActions.getByText("需求文档", { exact: true }).waitFor();
+    await dialog.getByRole("textbox", { name: "搜索事件", exact: true }).fill("异常规则");
+    await dialog.getByRole("checkbox", { name: /直播清晰度/ }).waitFor();
+    assert.equal(await dialog.getByRole("checkbox", { name: /个人成长/ }).count(), 0);
     await dialog.getByRole("checkbox", { name: /直播清晰度/ }).check();
+    await dialog.getByRole("textbox", { name: "搜索事件", exact: true }).fill("");
+    assert.equal(await dialog.getByRole("checkbox", { name: /直播清晰度/ }).isChecked(), true);
     await dialog.getByRole("checkbox", { name: /个人成长/ }).check();
     assert.equal(await dialog.getByText("已推迟事件", { exact: true }).count(), 0);
     await dialog.getByRole("button", { name: "添加到今日池", exact: true }).click();
     await pool.getByText("行动完成 1/4", { exact: true }).waitFor();
     await dialog.waitFor({ state: "hidden" });
+    const savedMembership = await page.evaluate(() => JSON.stringify(window.poolFixture.pools));
+    for (let index = 0; index < 10; index += 1) {
+      await trigger.click();
+      assert.equal(await page.locator("#daily-event-pool").count(), 0);
+      await trigger.click();
+      assert.equal(await page.locator("#daily-event-pool").count(), 1);
+      await pool.getByText("行动完成 1/4", { exact: true }).waitFor();
+      assert.equal(await page.locator(".daily-statistics").count(), 1);
+    }
+    assert.equal(await page.evaluate(() => JSON.stringify(window.poolFixture.pools)), savedMembership);
     await shot("daily-pool-desktop.png");
     const dragAction = page.getByLabel("拖动行动：直播清晰度 - 需求文档", { exact: true });
     await dragAction.dragTo(plans.nth(0));
@@ -185,6 +225,7 @@ test("daily event pool saves per day, drags copies safely, tracks progress and p
     await pool.getByText("行动完成 1/4", { exact: true }).waitFor();
     assert.equal(await dragAction.getAttribute("draggable"), "true");
     await page.locator(".daily-review-cell").nth(0).click();
+    await page.waitForFunction(() => [...document.querySelectorAll(".ant-modal")].every((modal) => getComputedStyle(modal).transform === "none"));
     await dialog.getByLabel("实际工作情况", { exact: true }).fill("需求文档已完成");
     await dialog.getByRole("checkbox", { name: "已完成行动", exact: true }).check();
     await dialog.getByRole("button", { name: "保存复盘", exact: true }).click();
@@ -232,6 +273,7 @@ test("daily event pool saves per day, drags copies safely, tracks progress and p
     assert.equal(await pool.evaluate((el) => el.scrollWidth <= el.clientWidth), true);
     assert.equal(await trigger.evaluate((el) => el.scrollWidth <= el.clientWidth), true);
     assert.deepEqual(errors, []);
+    assert.deepEqual(keyWarnings, []);
   } catch (error) {
     await shot("daily-pool-failure.png");
     throw error;

@@ -55,7 +55,7 @@ test("daily statistics totals, live edits, dates, category errors and responsive
           return structuredClone(events);
         }
         if (cmd === "get_actions") return structuredClone(actions);
-        if (cmd === "get_ai_tasks") return [];
+        if (cmd === "get_ai_tasks" || cmd === "get_daily_activity_items") return [];
         if (cmd === "get_daily_schedule") {
           if (args.listDate === "2026-09-27") {
             return new Promise((resolve) => { window.resolveOldSchedule = () => resolve({ list_date: args.listDate, slots: [] }); });
@@ -125,7 +125,7 @@ test("daily statistics totals, live edits, dates, category errors and responsive
     assert.deepEqual(await rows.allTextContents(), ["成长1 小时100%"]);
     await chooseDate("2026年09月25日");
     await total("0 分钟");
-    await region.getByText("当日暂无已安排行动", { exact: true }).waitFor();
+    await region.locator(".daily-statistics-breakdown").getByText("当日暂无已安排行动", { exact: true }).waitFor();
     assert.equal(await region.locator("tbody tr").count(), 0);
 
     await page.evaluate(() => { window.statsFixture.failEvents = true; });

@@ -100,7 +100,7 @@ test("delay preserves progress, restores the correct tab, and excludes both pick
     await confirmDelay();
     assert.match(await card("推进中的项目").innerText(), /行动 1\/2/);
     await card("推进中的项目").getByRole("button", { name: "恢复进行", exact: true }).waitFor();
-    assert.equal(await card("推进中的项目").getByRole("button", { name: "去处理", exact: true }).count(), 0);
+    assert.equal(await card("推进中的项目").getByRole("button", { name: "开始推进", exact: true }).count(), 0);
 
     await openDelay("推进中的项目", true);
     assert.equal(await page.getByRole("dialog").getByLabel("推迟原因（可选）").inputValue(), "等待资料补齐");
@@ -125,12 +125,12 @@ test("delay preserves progress, restores the correct tab, and excludes both pick
     assert.ok(restoreBox && restoreBox.x >= 0 && restoreBox.x + restoreBox.width <= 390);
     await page.setViewportSize({ width: 1280, height: 850 });
 
-    await selectTab("待处理");
+    await selectTab("待梳理");
     await openDelay("还没处理的事项");
     await confirmDelay();
-    await card("还没处理的事项").getByRole("button", { name: "恢复待处理", exact: true }).click();
+    await card("还没处理的事项").getByRole("button", { name: "恢复待梳理", exact: true }).click();
     await card("还没处理的事项").waitFor();
-    assert.equal(await page.getByRole("tab", { name: /待处理/ }).getAttribute("aria-selected"), "true");
+    assert.equal(await page.getByRole("tab", { name: /待梳理/ }).getAttribute("aria-selected"), "true");
 
     await page.goto(`${baseUrl}/#/daily-list`);
     await page.locator(".daily-plan-cell").nth(1).click();

@@ -88,9 +88,9 @@ fn week_statistics(conn: &Connection, space_id: &str, week_start: &str) -> Resul
     Ok((total_minutes, categories))
 }
 
-fn week_items(conn: &Connection, space_id: &str, week_start: &str) -> Result<Vec<WeeklyAction>, String> {
-    let start = NaiveDate::parse_from_str(week_start, "%Y-%m-%d").map_err(|error| error.to_string())?;
-    let end = start.checked_add_days(Days::new(7)).ok_or("周日期超出范围")?;
+fn period_items(conn: &Connection, space_id: &str, period_start: &str, days: u64) -> Result<Vec<WeeklyAction>, String> {
+    let start = NaiveDate::parse_from_str(period_start, "%Y-%m-%d").map_err(|error| error.to_string())?;
+    let end = start.checked_add_days(Days::new(days)).ok_or("统计日期超出范围")?;
     let local_midnight = |date: NaiveDate| {
         date.and_hms_opt(0, 0, 0).unwrap().and_local_timezone(Local).earliest()
             .map(|value| value.timestamp_millis()).ok_or("周日期无法转换为本地时间")
@@ -103,7 +103,7 @@ fn week_items(conn: &Connection, space_id: &str, week_start: &str) -> Result<Vec
             SELECT s.action_id, s.list_date, s.start_time, s.end_time, s.actual_notes,
                    0 AS parallel, MAX(0, {SLOT_MINUTES}) AS minutes
             FROM daily_schedule_slots s
-            WHERE s.space_id=?1 AND s.list_date>=?2 AND s.list_date<date(?2, '+7 days') AND s.action_id IS NOT NULL
+            WHERE s.space_id=?1 AND s.list_date>=?2 AND s.list_date<?5 AND s.action_id IS NOT NULL
             UNION ALL
             SELECT t.linked_action_id, t.list_date, s.start_time, s.end_time,
                    COALESCE(NULLIF(t.result, ''), NULLIF(t.notes, '')), 1, 0
@@ -111,7 +111,7 @@ fn week_items(conn: &Connection, space_id: &str, week_start: &str) -> Result<Vec
             JOIN daily_schedule_slots s ON s.id=t.slot_id AND s.space_id=t.space_id
                  AND s.list_date=t.list_date AND s.action_id=t.action_id
             JOIN actions parent ON parent.id=t.action_id AND parent.space_id=t.space_id AND parent.deleted_at IS NULL
-            WHERE t.space_id=?1 AND t.deleted_at IS NULL AND t.list_date>=?2 AND t.list_date<date(?2, '+7 days')
+            WHERE t.space_id=?1 AND t.deleted_at IS NULL AND t.list_date>=?2 AND t.list_date<?5
         )
         SELECT a.id, a.title, a.description, e.id, e.title, c.name, c.color,
                a.status, a.completed_at,
@@ -127,7 +127,7 @@ fn week_items(conn: &Connection, space_id: &str, week_start: &str) -> Result<Vec
         ORDER BY a.id, r.list_date, r.start_time, r.parallel"
     );
     let mut statement = conn.prepare(&query).map_err(|error| error.to_string())?;
-    let mut rows = statement.query(params![space_id, week_start, start_ms, end_ms]).map_err(|error| error.to_string())?;
+    let mut rows = statement.query(params![space_id, period_start, start_ms, end_ms, end.format("%Y-%m-%d").to_string()]).map_err(|error| error.to_string())?;
     let mut items = BTreeMap::<i64, WeeklyAction>::new();
     let mut collect = || -> rusqlite::Result<()> {
         while let Some(row) = rows.next()? {
@@ -162,7 +162,7 @@ pub(super) fn read_summary(conn: &Connection, week_start: &str) -> Result<Weekly
     let space_id = current_space_id(conn).map_err(|error| error.to_string())?;
     let (content, updated_at) = read_note(conn, &space_id, week_start)?;
     let (total_minutes, categories) = week_statistics(conn, &space_id, week_start)?;
-    let items = week_items(conn, &space_id, week_start)?;
+    let items = period_items(conn, &space_id, week_start, 7)?;
     Ok(WeeklySummary {
         space_id,
         week_start: week_start.into(),
@@ -172,6 +172,21 @@ pub(super) fn read_summary(conn: &Connection, week_start: &str) -> Result<Weekly
         categories,
         items,
     })
+}
+
+#[tauri::command]
+pub fn get_daily_activity_items(state: State<'_, AppState>, list_date: String) -> Result<Vec<WeeklyAction>, String> {
+    let conn = state.db.lock().map_err(|error| error.to_string())?;
+    read_daily_items(&conn, &list_date)
+}
+
+pub(super) fn read_daily_items(conn: &Connection, list_date: &str) -> Result<Vec<WeeklyAction>, String> {
+    let date = NaiveDate::parse_from_str(list_date, "%Y-%m-%d").map_err(|_| "统计日期格式无效")?;
+    if date.format("%Y-%m-%d").to_string() != list_date {
+        return Err("统计日期格式无效".into());
+    }
+    let space = current_space_id(conn).map_err(|error| error.to_string())?;
+    period_items(conn, &space, list_date, 1)
 }
 
 #[tauri::command]

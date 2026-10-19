@@ -6,6 +6,7 @@ import { formatDuration, summarizeDailyReview, summarizeDailySchedule } from "@/
 import { dailyAiSummary } from "@/lib/aiTasks";
 import { useFeaturePreferences } from "@/lib/featurePreferences";
 import type { AiTask, DailyScheduleSlot, Event } from "@/types";
+import DailyActivityItems from "@/components/DailyActivityItems";
 
 export default function DailyStatistics({ date, slots, aiTasks = [] }: { date: string; slots: DailyScheduleSlot[]; aiTasks?: AiTask[] }) {
   const { features } = useFeaturePreferences();
@@ -90,5 +91,6 @@ export default function DailyStatistics({ date, slots, aiTasks = [] }: { date: s
       <span>已安排时长 <strong>{formatDuration(ai.minutes)}</strong></span>
       {ai.untimed > 0 && <span>未设时间 {ai.untimed} 项</span>}
     </div>}
+    <DailyActivityItems date={date} slots={slots} aiTasks={aiTasks} />
   </section>;
 }

@@ -141,6 +141,8 @@ export default function Inbox() {
   const [newCategoryId, setNewCategoryId] = useState<number>();
   const [busyActions, setBusyActions] = useState<Set<number>>(() => new Set());
   const busyActionIds = useRef(new Set<number>());
+  const [startingEvents, setStartingEvents] = useState<Set<number>>(() => new Set());
+  const startingEventIds = useRef(new Set<number>());
   const [newTitle, setNewTitle] = useState("");
   const [editing, setEditing] = useState<Event | null>(null);
   const [processing, setProcessing] = useState<{
@@ -318,6 +320,23 @@ export default function Inbox() {
       setError(userFacingError(cause));
     }
   };
+  const startEvent = async (item: Event) => {
+    if (startingEventIds.current.has(item.id)) return;
+    startingEventIds.current.add(item.id);
+    setStartingEvents(new Set(startingEventIds.current));
+    try {
+      await eventsApi.start(item.id);
+      setExpandedEventIds((current) => new Set([...current, item.id]));
+      setFilter("events");
+      await load();
+      message.success("已开始推进");
+    } catch (cause) {
+      setError(userFacingError(cause));
+    } finally {
+      startingEventIds.current.delete(item.id);
+      setStartingEvents(new Set(startingEventIds.current));
+    }
+  };
   const remove = async (item: Event) => {
     try {
       await eventsApi.delete(item.id);
@@ -425,6 +444,8 @@ export default function Inbox() {
       board={board}
       onEdit={setEditing}
       onProcess={(mode) => setProcessing({ event: item, mode })}
+      onStart={() => void startEvent(item)}
+      starting={startingEvents.has(item.id)}
       onDelete={() => void remove(item)}
       onRestore={() => void restore(item)}
       onComplete={() => void complete(item)}
@@ -478,7 +499,7 @@ export default function Inbox() {
           activeKey={filter}
           onChange={(key) => setFilter(key as InboxTab)}
           items={[
-            { key: "pending", label: `待处理 ${counts.pending}` },
+            { key: "pending", label: `待梳理 ${counts.pending}` },
             { key: "events", label: `进行中 ${counts.events}` },
             { key: "delayed", label: `推迟 ${counts.delayed}` },
             { key: "abandoned", label: `已放弃 ${counts.abandoned}` },
@@ -677,7 +698,7 @@ export default function Inbox() {
         >
           <div className="inbox-guide-callout">
             <Typography.Text>
-              先在这里记录一个新事件，然后点击“去处理”，把它拆成一步步可直接执行的行动。
+              先记录一个新事件，在“待梳理”里添加行动；准备好后点击“开始推进”，进入进行中。
             </Typography.Text>
             <Button
               type="primary"
@@ -705,6 +726,8 @@ function EventRow({
   board,
   onEdit,
   onProcess,
+  onStart,
+  starting,
   onDelete,
   onRestore,
   onComplete,
@@ -724,6 +747,8 @@ function EventRow({
   board: boolean;
   onEdit: (event: Event) => void;
   onProcess: (mode: ProcessMode) => void;
+  onStart: () => void;
+  starting: boolean;
   onDelete: () => void;
   onRestore: () => void;
   onComplete: () => void;
@@ -740,7 +765,7 @@ function EventRow({
 }) {
   const canFinish = item.status === 1 && item.completed_action_count === item.action_count;
   const active = item.status === 0 || item.status === 1 || item.status === 3;
-  const readOnly = item.status !== 1;
+  const readOnly = ![0, 1].includes(item.status) || starting;
   const menuItems = [
     ...(active ? [{ key: "delay", label: item.status === 3 ? "调整推迟" : "推迟", onClick: () => onProcess("delay") }] : []),
     ...(active ? [{ key: "abandon", label: "放弃", danger: true, onClick: () => onProcess("abandon") }] : []),
@@ -784,9 +809,9 @@ function EventRow({
           </Space>
           <Space size={6} onClick={(event) => event.stopPropagation()}>
             {item.status === 4 && <Button size="small" type="text" icon={<RotateCcw size={14} />} onClick={onRestore}>恢复</Button>}
-            {item.status === 3 && <Button size="small" type="primary" icon={<RotateCcw size={14} />} onClick={onRestore}>{item.delay_resume_status === 1 ? "恢复进行" : "恢复待处理"}</Button>}
+            {item.status === 3 && <Button size="small" type="primary" icon={<RotateCcw size={14} />} onClick={onRestore}>{item.delay_resume_status === 1 ? "恢复进行" : "恢复待梳理"}</Button>}
             {item.status === 1 && canFinish && <Button size="small" type="primary" icon={<Check size={14} />} onClick={onComplete}>完成</Button>}
-            {item.status === 0 && <Button size="small" type="primary" onClick={() => onProcess("self")}>去处理</Button>}
+            {item.status === 0 && <Button size="small" type="primary" aria-label="开始推进" loading={starting} onClick={onStart}>开始推进</Button>}
           </Space>
         </div>
       </div>
@@ -991,11 +1016,11 @@ function EventActionList({
           readOnly
             ? undefined
             : [
-                action.status === 0 ? (
+                event.status === 1 && action.status === 0 ? (
                   <Button key="complete" size="small" type="text" loading={busyActions.has(action.id)} icon={<Check size={14} />} onClick={() => onComplete(action)}>
                     完成
                   </Button>
-                ) : action.status === 1 ? (
+                ) : event.status === 1 && action.status === 1 ? (
                   <Button key="restore" size="small" type="text" loading={busyActions.has(action.id)} icon={<RotateCcw size={13} />} onClick={() => onRestore(action)}>
                     恢复
                   </Button>
@@ -1134,7 +1159,7 @@ function EventActionList({
             </Typography.Text>
           )}
         </Space>
-        {!readOnly && event.status === 1 && (
+        {!readOnly && [0, 1].includes(event.status) && (
           <Button
             size="small"
             type="primary"

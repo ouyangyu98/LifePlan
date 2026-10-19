@@ -161,6 +161,26 @@ pub fn get_events(state: State<'_, AppState>) -> Result<Vec<Event>, String> {
 }
 
 #[tauri::command]
+pub fn start_event(state: State<'_, AppState>, event_id: i64) -> Result<(), String> {
+    start_event_impl(&state, event_id)
+}
+
+pub(super) fn start_event_impl(state: &AppState, event_id: i64) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|error| error.to_string())?;
+    let space = current_space_id(&conn).map_err(|error| error.to_string())?;
+    // Starting a draft changes only its lifecycle, never its previously prepared actions or metadata.
+    let changed = conn.execute(
+        "UPDATE events SET status=1,updated_at=?1
+         WHERE id=?2 AND space_id=?3 AND status=0 AND deleted_at IS NULL",
+        params![now_millis(), event_id, space],
+    ).map_err(|error| error.to_string())?;
+    if changed != 1 {
+        return Err("只有待梳理的事件可以开始推进，请刷新后重试".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn create_event(state: State<'_, AppState>, payload: NewEvent) -> Result<Event, String> {
     create_event_impl(&state, payload)
 }

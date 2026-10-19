@@ -674,6 +674,151 @@ fn daily_pool_rejects_stale_spaces_unavailable_events_and_orphan_reviews() {
 }
 
 #[test]
+fn draft_actions_can_be_prepared_without_starting_and_survive_direct_start_unchanged() {
+    let state = state();
+    let parent = event(&state, None);
+    let make_action = |title: &str| actions::create_action_impl(&state, serde_json::from_value(json!({
+        "event_id": parent.id, "title": title, "description": "Keep notes", "estimated_hours": 0.5, "is_frog": 0,
+    })).unwrap()).unwrap();
+    let first = make_action("First draft step");
+    let second = make_action("Second draft step");
+    let removable = make_action("Discard this draft step");
+    let updated = actions::update_action_impl(&state, UpdateAction {
+        id: first.id, title: "Refined first step".into(), description: Some("Keep refined notes".into()),
+        estimated_hours: 1.0, start_date: None, deadline: None, is_frog: 0,
+    }).unwrap();
+    assert_eq!(updated.title, "Refined first step");
+    actions::reorder_event_actions_impl(&state, ReorderEventActions {
+        event_id: parent.id, action_ids: vec![second.id, first.id, removable.id],
+    }).unwrap();
+    actions::delete_action_impl(&state, removable.id).unwrap();
+    let space = current_space_id(&state.db.lock().unwrap()).unwrap();
+    let before = {
+        let conn = state.db.lock().unwrap();
+        assert_eq!(events::list_events(&conn).unwrap()[0].status, 0);
+        assert!(actions::validate_schedulable_event(&conn, &space, first.id).is_err());
+        conn.execute("UPDATE events SET target='Keep goal',history_note='Keep historical note',deadline='2026-12-31' WHERE id=?1", [parent.id]).unwrap();
+        serde_json::to_value(actions::list_actions(&conn).unwrap()).unwrap()
+    };
+    events::start_event_impl(&state, parent.id).unwrap();
+    {
+        let conn = state.db.lock().unwrap();
+        let started = &events::list_events(&conn).unwrap()[0];
+        assert_eq!(started.status, 1);
+        assert_eq!(started.action_count, 2);
+        assert_eq!(started.target.as_deref(), Some("Keep goal"));
+        assert_eq!(started.history_note.as_deref(), Some("Keep historical note"));
+        assert_eq!(started.deadline.as_deref(), Some("2026-12-31"));
+        assert_eq!(started.completed_action_count, 0);
+        assert_eq!(serde_json::to_value(actions::list_actions(&conn).unwrap()).unwrap(), before);
+        actions::validate_schedulable_event(&conn, &space, first.id).unwrap();
+    }
+    assert!(events::start_event_impl(&state, parent.id).is_err());
+    assert_eq!(serde_json::to_value(actions::list_actions(&state.db.lock().unwrap()).unwrap()).unwrap(), before);
+}
+
+#[test]
+fn starting_empty_drafts_is_allowed_but_invalid_status_foreign_and_deleted_events_are_rejected() {
+    let state = state();
+    let empty = event(&state, None);
+    events::start_event_impl(&state, empty.id).unwrap();
+    assert_eq!(events::list_events(&state.db.lock().unwrap()).unwrap()[0].action_count, 0);
+    for status in [1, 3, 4, 5] {
+        let parent = event(&state, None);
+        state.db.lock().unwrap().execute("UPDATE events SET status=?1 WHERE id=?2", params![status, parent.id]).unwrap();
+        let before = serde_json::to_value(events::list_events(&state.db.lock().unwrap()).unwrap()).unwrap();
+        assert!(events::start_event_impl(&state, parent.id).is_err());
+        assert_eq!(serde_json::to_value(events::list_events(&state.db.lock().unwrap()).unwrap()).unwrap(), before);
+        if status != 1 {
+            assert!(actions::create_action_impl(&state, serde_json::from_value(json!({
+                "event_id": parent.id, "title": "Blocked", "estimated_hours": 0, "is_frog": 0,
+            })).unwrap()).is_err());
+        }
+    }
+    let deleted = event(&state, None);
+    state.db.lock().unwrap().execute("UPDATE events SET deleted_at=1 WHERE id=?1", [deleted.id]).unwrap();
+    assert!(events::start_event_impl(&state, deleted.id).is_err());
+    assert!(events::start_event_impl(&state, 999999).is_err());
+    let foreign = event(&state, None);
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute("INSERT INTO local_spaces(space_id,created_at,updated_at) VALUES('draft-other',1,1)", []).unwrap();
+        conn.execute("UPDATE settings SET value='draft-other' WHERE key='current_space_id'", []).unwrap();
+    }
+    assert!(events::start_event_impl(&state, foreign.id).is_err());
+    assert_eq!(state.db.lock().unwrap().query_row("SELECT status FROM events WHERE id=?1", [foreign.id], |row| row.get::<_, i32>(0)).unwrap(), 0);
+}
+
+#[test]
+fn daily_activity_uses_one_local_day_and_keeps_completion_and_arrangements_separate() {
+    use chrono::{Days, Local, NaiveDate};
+    let state = drag_state();
+    let date = NaiveDate::from_ymd_opt(2026, 9, 28).unwrap();
+    let midnight = |value: NaiveDate| value.and_hms_opt(0, 0, 0).unwrap()
+        .and_local_timezone(Local).earliest().unwrap().timestamp_millis();
+    let start = midnight(date);
+    let end = midnight(date.checked_add_days(Days::new(1)).unwrap());
+    {
+        let conn = state.db.lock().unwrap();
+        let space = current_space_id(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO actions(id,space_id,sync_id,title,status,completed_at,created_at,updated_at)
+             VALUES (103,?1,'daily-unscheduled','Unscheduled completion',1,?2,1,1),
+                    (104,?1,'daily-next-day','Next day completion',1,?3,1,1),
+                    (105,?1,'daily-restored','Restored action',0,?2,1,1),
+                    (106,?1,'daily-deleted','Deleted action',1,?2,1,1),
+                    (107,?1,'daily-ai','Parallel action',0,NULL,1,1)",
+            params![space, start, end],
+        ).unwrap();
+        conn.execute("UPDATE actions SET completed_at=?1 WHERE id=102", [start - 1]).unwrap();
+        conn.execute("UPDATE actions SET deleted_at=1 WHERE id=106", []).unwrap();
+        conn.execute(
+            "INSERT INTO daily_schedule_slots(id,space_id,list_date,start_time,end_time,action_id,created_at,updated_at)
+             VALUES (205,?1,'2026-09-28','23:30','24:00',101,1,1),
+                    (206,?1,'2026-09-28','14:00','15:00',106,1,1)",
+            [&space],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO ai_tasks(space_id,slot_id,action_id,linked_action_id,list_date,title,result,created_at,updated_at)
+             VALUES (?1,201,101,107,'2026-09-28','Parallel action','AI result',1,1)",
+            [&space],
+        ).unwrap();
+    }
+    let before = drag_snapshot(&state);
+    {
+        let conn = state.db.lock().unwrap();
+        let items = weekly_summary::read_daily_items(&conn, "2026-09-28").unwrap();
+        assert_eq!(items.iter().map(|item| item.id).collect::<Vec<_>>(), vec![101, 102, 103, 107]);
+        let repeated = items.iter().find(|item| item.id == 101).unwrap();
+        assert_eq!(repeated.planned_minutes, 90);
+        assert_eq!(repeated.arrangements.len(), 2);
+        assert!(repeated.arrangements.iter().all(|entry| entry.list_date == "2026-09-28"));
+        assert_eq!(items.iter().filter(|item| item.completed_in_week).map(|item| item.id).collect::<Vec<_>>(), vec![103]);
+        assert!(items.iter().find(|item| item.id == 103).unwrap().arrangements.is_empty());
+        let parallel = items.iter().find(|item| item.id == 107).unwrap();
+        assert_eq!(parallel.planned_minutes, 0);
+        assert!(parallel.arrangements[0].parallel);
+        assert_eq!(parallel.arrangements[0].actual_notes.as_deref(), Some("AI result"));
+        assert!(weekly_summary::read_daily_items(&conn, "2026-02-30").is_err());
+        assert!(weekly_summary::read_daily_items(&conn, "2026-9-28").is_err());
+        let next = weekly_summary::read_daily_items(&conn, "2026-09-29").unwrap();
+        assert!(next.iter().any(|item| item.id == 104 && item.completed_in_week));
+        assert!(!next.iter().any(|item| item.id == 103));
+        let weekly = weekly_summary::read_summary(&conn, "2026-09-28").unwrap();
+        assert!(weekly.items.iter().any(|item| item.id == 104 && item.completed_in_week));
+        conn.execute("UPDATE actions SET status=1,completed_at=?1 WHERE id=101", [end - 1]).unwrap();
+        assert!(weekly_summary::read_daily_items(&conn, "2026-09-28").unwrap().iter().find(|item| item.id == 101).unwrap().completed_in_week);
+        conn.execute("UPDATE actions SET status=0,completed_at=NULL WHERE id=101", []).unwrap();
+        assert!(!weekly_summary::read_daily_items(&conn, "2026-09-28").unwrap().iter().find(|item| item.id == 101).unwrap().completed_in_week);
+    }
+    assert_eq!(drag_snapshot(&state), before);
+    let conn = state.db.lock().unwrap();
+    conn.execute("INSERT INTO local_spaces(space_id,created_at,updated_at) VALUES('daily-other',1,1)", []).unwrap();
+    conn.execute("UPDATE settings SET value='daily-other' WHERE key='current_space_id'", []).unwrap();
+    assert!(weekly_summary::read_daily_items(&conn, "2026-09-28").unwrap().is_empty());
+}
+
+#[test]
 fn weekly_summary_v23_migration_is_repeatable_and_preserves_existing_data() {
     let mut conn = Connection::open_in_memory().unwrap();
     run_migrations(&mut conn).unwrap();

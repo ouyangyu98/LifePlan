@@ -199,7 +199,7 @@ export default function DailyList() {
       <Tooltip title="今日事件池"><Button className="daily-pool-trigger" aria-expanded={poolOpen} aria-controls="daily-event-pool" onClick={() => setPoolOpen((value) => !value)}
         icon={<ListTree size={15} />}>今日事件池{pool.data && <span className="daily-pool-trigger-count">{pool.data.entries.length} 事件 · {pool.completed}/{pool.total}</span>}{poolOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</Button></Tooltip>
       </div><Typography.Paragraph className="page-subtitle">按时间安排行动，并在右侧独立记录该计划执行情况的复盘。</Typography.Paragraph></div><div className="daily-date-panel">{isToday && <Tag color="blue" className="daily-today-tag">今天</Tag>}<DatePicker value={dayjs(date)} format="YYYY年MM月DD日" allowClear={false} cellRender={(current, info) => { if (info.type !== "date" || !usedDates.has(dayjs(current).format("YYYY-MM-DD"))) return info.originNode; return <div className="daily-date-cell is-used">{info.originNode}<span className="daily-date-used-dot" aria-label="这天使用过今日事" /></div>; }} onChange={(value) => value && setDate(value.format("YYYY-MM-DD"))} /><Typography.Text className="daily-date-context"><span className="daily-weekday-name">{weekdayName}</span></Typography.Text></div></header>
-    {poolOpen && <DailyEventPool key={date} pool={pool} slots={slots} assigning={poolAssigning} onClose={() => setPoolOpen(false)} onDrag={setPoolDrag}
+    {poolOpen && <DailyEventPool key={`pool:${date}`} pool={pool} slots={slots} assigning={poolAssigning} onClose={() => setPoolOpen(false)} onDrag={setPoolDrag}
       onAssign={assignPoolAction} onActionStatus={changePoolActionStatus} onOpenInbox={() => navigate("/inbox")} />}
     {error && <Alert className="page-alert" type="error" showIcon message={error} closable onClose={() => setError("")} />}
     {ai.error && <Alert className="page-alert" type="warning" showIcon message="AI 任务加载失败" description={ai.error} action={<Button size="small" onClick={ai.retry}>重试</Button>} />}
@@ -210,7 +210,7 @@ export default function DailyList() {
         <Space><Button type="primary" icon={<Plus size={15} />} onClick={() => setInsertPreset({})}>新增时间段</Button>
           <Button onClick={() => navigate("/inbox")}>去事件篮记录</Button>
           {features.templates && <Button onClick={() => void saveTemplate()}>保存空模板</Button>}</Space>
-      </div>} /></div> : <ScheduleTable key={date} slots={slots} aiTasks={ai.tasks}
+      </div>} /></div> : <ScheduleTable key={`schedule:${date}`} slots={slots} aiTasks={ai.tasks}
         aiUnavailable={ai.loading || Boolean(ai.error)} poolDrag={poolDrag} poolAssigning={poolAssigning} onPoolAssign={assignPoolAction}
         onAiTask={(slot, task) => { if (task) setAiSelection({ slot, task }); else setAiPickerSlot(slot); }}
         onPlan={setPickerSlot} onReview={(slot) => {
@@ -240,7 +240,7 @@ export default function DailyList() {
     <TimeSlotModal slot={timeSlot} onClose={() => setTimeSlot(null)} onSaved={async () => { setTimeSlot(null); await load(); }} onDeleted={async () => { setTimeSlot(null); await load(); message.success("时间段已删除"); }} />
     <InsertSlotModal date={date} preset={insertPreset} onClose={() => setInsertPreset(null)} onSaved={async () => { setInsertPreset(null); await load(); message.success("已新增时间段"); }} />
     {features.aiParallel && aiRecordSelection && aiRecordSelection.slot.list_date === date && <DailyAiTaskEditor key={`${date}:${aiRecordSelection.task.id}`} selection={aiRecordSelection} onClose={() => setAiRecordSelection(null)} onSaved={(task) => { ai.upsert(task); ai.retry(); void load(); }} onDeleted={ai.remove} onRefresh={ai.retry} onOpenInbox={() => { setAiRecordSelection(null); navigate("/inbox"); }} />}
-    {!loading && !error && schedule?.list_date === date && features.dailyStatistics && <DailyStatistics key={date} date={date} slots={slots} aiTasks={ai.tasks} />}
+    {!loading && !error && schedule?.list_date === date && features.dailyStatistics && <DailyStatistics key={`statistics:${date}`} date={date} slots={slots} aiTasks={ai.tasks} />}
     {features.workLog && workLogOpen && <WorkLogModal date={date} slots={slots} onClose={() => setWorkLogOpen(false)} />}
   </div>;
 }
