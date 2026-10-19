@@ -56,6 +56,10 @@ test("website renders real assets, responsive layouts, accessible navigation, ga
       await page.getByRole("button", { name: `放大查看${label}界面`, exact: true }).click();
       const preview = page.getByRole("dialog", { name: `${label}界面大图`, exact: true });
       await preview.waitFor();
+      await page.waitForFunction(() => {
+        const image = document.querySelector(".image-dialog img");
+        return image?.complete && image.naturalWidth > 0;
+      });
       assert.equal(await preview.locator("img").evaluate(el => el.complete && el.naturalWidth > 0), true);
       await preview.getByRole("button", { name: "关闭大图", exact: true }).click();
     }
