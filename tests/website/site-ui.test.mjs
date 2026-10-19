@@ -9,6 +9,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || "playwright");
 const base = process.env.WEBSITE_TEST_URL || "http://127.0.0.1:1423/life/";
 const screenshots = process.env.UI_SCREENSHOT_DIR || "personal.local/website-check";
 const requireDownloads = process.env.WEBSITE_REQUIRE_DOWNLOADS === "1";
+const expectedVersion = process.env.WEBSITE_EXPECT_VERSION;
 
 test("website renders real assets, responsive layouts, accessible navigation, gallery and honest downloads", { timeout: 90000 }, async () => {
   const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -50,6 +51,21 @@ test("website renders real assets, responsive layouts, accessible navigation, ga
     assert.equal(await page.getByRole("tab", { name: /心得/ }).getAttribute("aria-selected"), "true");
     await page.getByRole("button", { name: "放大查看心得界面", exact: true }).click();
     await page.getByRole("button", { name: "关闭大图", exact: true }).click();
+    for (const label of ["每日回顾", "周总结"]) {
+      await page.getByRole("tab", { name: new RegExp(`^${label}`) }).click();
+      await page.getByRole("button", { name: `放大查看${label}界面`, exact: true }).click();
+      const preview = page.getByRole("dialog", { name: `${label}界面大图`, exact: true });
+      await preview.waitFor();
+      assert.equal(await preview.locator("img").evaluate(el => el.complete && el.naturalWidth > 0), true);
+      await preview.getByRole("button", { name: "关闭大图", exact: true }).click();
+    }
+    await page.getByRole("heading", { name: "从梳理，到每天的推进与回顾。", exact: true }).waitFor();
+    await page.getByText("时间、推进事项和完成事项分别怎么算？", { exact: true }).click();
+    const countingFaq = page.locator(".faq-list details").filter({ hasText: "时间、推进事项和完成事项分别怎么算？" });
+    assert.match(await countingFaq.textContent(), /不是自动测得的实际工作时长/);
+    assert.match(await countingFaq.textContent(), /恢复为待办/);
+    await page.getByText("更新版本会丢失历史数据吗？", { exact: true }).click();
+    assert.match(await page.locator(".faq-list details").filter({ hasText: "更新版本会丢失历史数据吗？" }).textContent(), /沿用原有数据目录/);
     await page.getByText("这里的 AI 任务会自动执行吗？", { exact: true }).click();
     const faq = page.locator(".faq-list details").filter({ hasText: "这里的 AI 任务会自动执行吗？" });
     assert.equal(await faq.getAttribute("open"), "");
@@ -59,11 +75,13 @@ test("website renders real assets, responsive layouts, accessible navigation, ga
       assert.match(await anchor.getAttribute("href"), /^https:\/\/github\.com\//);
     }
     assert.equal(await page.locator(".download-card").count(), 2);
+    if (expectedVersion) await page.locator(".release-badge").getByText(expectedVersion, { exact: true }).waitFor();
     for (const card of await page.locator(".download-card").all()) {
       const download = card.locator(".download-button");
       if (requireDownloads) assert.ok(await download.getAttribute("href"), "Every platform must be downloadable");
       if (await download.getAttribute("href")) {
         assert.match(await download.getAttribute("href"), /^https:\/\/github\.com\/ouyangyu98\/LifePlan\/releases\/download\//);
+        if (expectedVersion) assert.ok((await download.getAttribute("href")).includes(`/releases/download/${expectedVersion}/`));
         await card.locator(".checksum summary").click();
         assert.match(await card.locator(".checksum code").textContent(), /^[a-f0-9]{64}$/);
       } else {

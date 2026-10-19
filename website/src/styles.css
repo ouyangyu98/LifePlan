@@ -35,7 +35,7 @@ p { line-height: 1.85; }
 .brand { display: inline-flex; align-items: center; gap: 10px; font-size: 23px; font-weight: 650; flex-shrink: 0; }
 .brand img { border-radius: 7px; }
 .edition { font-size: 11px; font-weight: 450; color: var(--muted); border-left: 1px solid var(--line); margin-left: 4px; padding-left: 12px; }
-.nav-links { display: flex; align-items: center; justify-content: flex-end; gap: 27px; margin-left: auto; font-size: 13px; font-weight: 500; }
+.nav-links { display: flex; align-items: center; justify-content: flex-end; gap: 22px; margin-left: auto; font-size: 13px; font-weight: 500; }
 .nav-links a { display: flex; align-items: center; gap: 7px; white-space: nowrap; transition: color .15s; }
 .nav-links a:hover, .footer-links a:hover, .download-footer a:hover { color: var(--blue); }
 .nav-download { display: flex; align-items: center; justify-content: center; gap: 14px; height: 36px; min-width: 82px; padding: 0 14px; border: 1px solid var(--line); border-radius: 5px; font-size: 13px; font-weight: 600; }
@@ -69,7 +69,7 @@ p { line-height: 1.85; }
 h2 { font-size: 36px; line-height: 1.5; font-weight: 600; }
 .section-heading h2, .choice-copy h2, .faq-section h2 { margin-top: 15px; }
 .section-heading > p { font-size: 14px; color: var(--muted); padding-bottom: 5px; }
-.product-tabs { display: flex; border-bottom: 1px solid var(--line); gap: 26px; }
+.product-tabs { display: flex; flex-wrap: wrap; border-bottom: 1px solid var(--line); gap: 0 26px; }
 .product-tabs button { display: flex; align-items: center; gap: 9px; height: 54px; padding: 0 3px; border: 0; background: transparent; color: var(--muted); font-size: 14px; position: relative; }
 .product-tabs button::after { position: absolute; content: ""; height: 2px; bottom: -1px; left: 0; width: 100%; background: transparent; }
 .product-tabs button[aria-selected="true"] { color: var(--blue); font-weight: 600; }
@@ -100,6 +100,15 @@ h2 { font-size: 36px; line-height: 1.5; font-weight: 600; }
 .choice-section { display: grid; grid-template-columns: 1fr 1fr; gap: 90px; align-items: center; }
 .choice-copy > p { margin-top: 20px; font-size: 14px; color: var(--muted); }
 .choice-footnote { display: inline-flex; align-items: center; gap: 8px; margin-top: 28px; color: #7f878f; font-size: 12px; }
+.updates-section { border-top: 1px solid var(--line); background: #fafcfd; }
+.updates-section .section { padding-block: 72px; }
+.updates-section h2 { font-size: 30px; }
+.updates-release-link { display: inline-flex; align-items: center; gap: 8px; color: var(--blue); font-size: 12px; white-space: nowrap; }
+.updates-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; }
+.updates-list article { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.updates-list article > svg { color: var(--teal); margin-top: 2px; }
+.updates-list h3 { font-size: 16px; font-weight: 550; line-height: 1.6; }
+.updates-list p { font-size: 13px; color: var(--muted); margin-top: 10px; }
 .optional-item { display: grid; grid-template-columns: 18px 92px 1fr; align-items: center; gap: 12px; padding: 19px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 .optional-item:first-child { border-top: 1px solid var(--line); }
 .optional-item > svg { color: #88939f; }
@@ -201,7 +210,7 @@ summary::-webkit-details-marker { display: none; }
   .eyebrow { font-size: 11px; }
   .section-heading { display: block; margin-bottom: 26px; }
   .section-heading > p { margin-top: 19px; font-size: 13px; }
-  .product-tabs { gap: 22px; }
+  .product-tabs { gap: 0 18px; }
   .product-tabs button { font-size: 13px; gap: 7px; }
   .optional-label { display: none; }
   .product-image-button { margin-top: 20px; }
@@ -224,6 +233,10 @@ summary::-webkit-details-marker { display: none; }
   .choice-section { grid-template-columns: 1fr; gap: 30px; }
   .choice-copy > p { font-size: 13px; }
   .choice-footnote { margin-top: 20px; font-size: 11px; }
+  .updates-section .section { padding-block: 55px; }
+  .updates-section h2 { font-size: 25px; }
+  .updates-release-link { margin-top: 16px; }
+  .updates-list { grid-template-columns: 1fr; gap: 24px; }
   .optional-item { grid-template-columns: 16px 83px 1fr; gap: 9px; padding: 16px 0; font-size: 12px; }
   .optional-item > span:last-child { font-size: 11px; }
   .download-section .section { padding-top: 58px; padding-bottom: 45px; }

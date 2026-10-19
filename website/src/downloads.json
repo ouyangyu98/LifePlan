@@ -1,7 +1,7 @@
 {
-  "version": "v1.1.7",
-  "publishedAt": "2026-10-19T07:05:00Z",
-  "releaseUrl": "https://github.com/ouyangyu98/LifePlan/releases/tag/v1.1.7",
+  "version": "v1.1.9",
+  "publishedAt": "2026-10-19T09:07:39Z",
+  "releaseUrl": "https://github.com/ouyangyu98/LifePlan/releases/tag/v1.1.9",
   "platforms": [
     {
       "id": "mac-arm",
@@ -10,10 +10,10 @@
       "detail": "适用于 M 系列芯片",
       "extension": "DMG",
       "asset": {
-        "name": "LifePlan.OY_1.1.7_aarch64.dmg",
-        "url": "https://github.com/ouyangyu98/LifePlan/releases/download/v1.1.7/LifePlan.OY_1.1.7_aarch64.dmg",
-        "bytes": 7850574,
-        "sha256": "f2d61c33e7b7649d8fe7469713b5a8de30046f7d17bf5fe355603d79eb22f39d"
+        "name": "LifePlan.OY_1.1.9_aarch64.dmg",
+        "url": "https://github.com/ouyangyu98/LifePlan/releases/download/v1.1.9/LifePlan.OY_1.1.9_aarch64.dmg",
+        "bytes": 7846551,
+        "sha256": "35f2ce335624bcf89b9838636138aad171c0fb46093d99be310dbd19bac2fb00"
       }
     },
     {
@@ -23,10 +23,10 @@
       "detail": "适用于 Intel / AMD 64 位电脑",
       "extension": "EXE",
       "asset": {
-        "name": "LifePlan.OY_1.1.7_x64-setup.exe",
-        "url": "https://github.com/ouyangyu98/LifePlan/releases/download/v1.1.7/LifePlan.OY_1.1.7_x64-setup.exe",
-        "bytes": 5452550,
-        "sha256": "a815ef11e384ba765afbb33b8b981d3c046b41bfa3b478f2235689169dc367d5"
+        "name": "LifePlan.OY_1.1.9_x64-setup.exe",
+        "url": "https://github.com/ouyangyu98/LifePlan/releases/download/v1.1.9/LifePlan.OY_1.1.9_x64-setup.exe",
+        "bytes": 5461279,
+        "sha256": "49367a9770f86dbaa97a4e60d5affad784a7e7d088d6ac469e6bcb71fee2293c"
       }
     }
   ]

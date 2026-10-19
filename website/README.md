@@ -31,6 +31,9 @@ Set `PLAYWRIGHT_PATH` to an existing Playwright installation when needed.
 The app development server must already be running on port 1420.
 
 Never publish screenshots from the user's real desktop session.
+The gallery includes Today's schedule and event pool, the event board, Insights,
+daily review statistics and Weekly summaries. All captures use fictional fixtures
+against the current application; no installed client or personal database is read.
 
 ## Downloads
 
@@ -66,6 +69,8 @@ Tests cover desktop/mobile overflow, image loading, the first viewport,
 navigation, gallery keyboard interaction, the image dialog, FAQs and downloads.
 Set `WEBSITE_REQUIRE_DOWNLOADS=1` after publication to require working links
 for both platforms and to check expanded checksums on mobile.
+Set `WEBSITE_EXPECT_VERSION=vX.Y.Z` when verifying a deployment to reject stale
+release badges or installer links, even if the rest of the page still loads.
 
 ## Deployment
 
