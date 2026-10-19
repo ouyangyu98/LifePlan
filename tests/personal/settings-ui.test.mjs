@@ -50,7 +50,7 @@ test("optional features persist, hide every entry and preserve records", { timeo
     };
   });
   const link = (name) => page.locator(".sidebar").getByRole("link", { name, exact: true });
-  const featureKeys = { 工作日志: "workLog", 日程模板: "templates", 奖励池: "rewards", 番茄钟: "pomodoro", 心得: "insights", 周总结: "weeklySummary", 数据统计: "dailyStatistics", "AI 并行": "aiParallel" };
+  const featureKeys = { 工作日志: "workLog", 日程模板: "templates", 奖励池: "rewards", 番茄钟: "pomodoro", 心得: "insights", 周总结: "weeklySummary", 数据统计: "dailyStatistics", 是否达到预期: "reviewExpectation", "AI 并行": "aiParallel" };
   const featureSwitch = (name) => page.locator(`#feature-${featureKeys[name]}`);
   const goSettings = async () => {
     await link("设置").click();
@@ -71,7 +71,7 @@ test("optional features persist, hide every entry and preserve records", { timeo
     await page.getByRole("dialog").locator(".ant-modal-close").click();
 
     await goSettings();
-    assert.equal(await page.locator(".feature-setting-row .ant-switch").count(), 8);
+    assert.equal(await page.locator(".feature-setting-row .ant-switch").count(), 9);
     await page.waitForFunction(() => document.querySelectorAll(".sidebar .ant-menu-item-selected").length === 1);
     assert.equal(await page.locator(".sidebar .ant-menu-item-selected").innerText(), "设置");
     await shot("settings-desktop.png");
@@ -80,13 +80,13 @@ test("optional features persist, hide every entry and preserve records", { timeo
     await page.getByText("番茄钟正在计时，请先完成或结束本次专注", { exact: true }).waitFor();
     assert.equal(await featureSwitch("番茄钟").getAttribute("aria-checked"), "true");
     await page.evaluate(() => { window.activeTimer = false; });
-    for (const name of ["工作日志", "日程模板", "奖励池", "番茄钟", "心得", "周总结", "数据统计", "AI 并行"]) {
+    for (const name of ["工作日志", "日程模板", "奖励池", "番茄钟", "心得", "周总结", "数据统计", "是否达到预期", "AI 并行"]) {
       await featureSwitch(name).click();
       await page.waitForFunction((key) => document.querySelector(`#feature-${key}`)?.getAttribute("aria-checked") === "false", featureKeys[name]);
     }
     await page.reload();
     await page.getByRole("heading", { name: "可选功能" }).waitFor();
-    assert.equal(await page.locator('.feature-setting-row .ant-switch[aria-checked="false"]').count(), 8);
+    assert.equal(await page.locator('.feature-setting-row .ant-switch[aria-checked="false"]').count(), 9);
     for (const name of ["番茄钟", "奖励池", "心得", "周总结"]) assert.equal(await link(name).count(), 0);
     await link("今日事").click();
     await page.getByRole("button", { name: "保留的行动", exact: true }).waitFor();
@@ -116,7 +116,7 @@ test("optional features persist, hide every entry and preserve records", { timeo
     await page.getByRole("button", { name: "保存空模板", exact: true }).waitFor();
 
     await goSettings();
-    for (const name of ["工作日志", "奖励池", "番茄钟", "心得", "周总结", "数据统计", "AI 并行"]) await featureSwitch(name).click();
+    for (const name of ["工作日志", "奖励池", "番茄钟", "心得", "周总结", "数据统计", "是否达到预期", "AI 并行"]) await featureSwitch(name).click();
     await page.evaluate(() => { window.emptySchedule = false; });
     await link("今日事").click();
     await page.getByRole("button", { name: "工作日志", exact: true }).waitFor();

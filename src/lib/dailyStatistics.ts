@@ -1,4 +1,5 @@
 import type { DailyScheduleSlot, Event } from "../types/index";
+import { isDailyReviewComplete } from "./dailyReview.ts";
 
 export interface CategoryDuration {
   id: number | null;
@@ -30,11 +31,9 @@ export function summarizeDailyReview(slots: readonly DailyScheduleSlot[]) {
     const minutes = timeMinutes(slot.end_time) - timeMinutes(slot.start_time);
     if (!Number.isFinite(minutes) || minutes <= 0) continue;
     plannedMinutes += minutes;
-    if (!slot.actual_notes?.trim()
-      || ![0, 1].includes(slot.met_expectation as number)
-      || ![0, 1].includes(slot.focused as number)) continue;
+    if (!isDailyReviewComplete(slot)) continue;
     reviewedMinutes += minutes;
-    if (slot.met_expectation === 1 && slot.focused === 1) efficientMinutes += minutes;
+    if (slot.focused === 1) efficientMinutes += minutes;
   }
   const share = (part: number, total: number) => total ? Math.round(part / total * 1000) / 10 : null;
   return {

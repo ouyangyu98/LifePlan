@@ -79,7 +79,13 @@ export interface NewEventCategory { name: string; color: string }
 export type UpdateEventCategory = NewEventCategory & { id: number };
 export interface InsightsNote { space_id: string; content: string; updated_at: number }
 export interface WeeklyCategoryDuration { id: number | null; name: string; color: string; minutes: number; percentage: number }
-export interface WeeklySummary { space_id: string; week_start: string; content: string; updated_at: number; total_minutes: number; categories: WeeklyCategoryDuration[] }
+export interface WeeklyActionArrangement { list_date: string; start_time: string; end_time: string; actual_notes: string | null; parallel: boolean }
+export interface WeeklyAction {
+  id: number; title: string; description: string | null; event_id: number | null; event_title: string | null;
+  category_name: string | null; category_color: string | null; status: ActionStatus; completed_at: number | null;
+  completed_in_week: boolean; planned_minutes: number; arrangements: WeeklyActionArrangement[];
+}
+export interface WeeklySummary { space_id: string; week_start: string; content: string; updated_at: number; total_minutes: number; categories: WeeklyCategoryDuration[]; items: WeeklyAction[] }
 export interface WeeklyRecord { week_start: string; content: string; updated_at: number; total_minutes: number }
 
 export interface ProcessEvent {
@@ -181,7 +187,7 @@ export interface NewAiTask extends AiTaskFields { slot_id: number; action_id: nu
 export interface UpdateAiTask extends AiTaskFields { id: number; expected_updated_at: number }
 export interface NewDailySlot { list_date: string; start_time: string; end_time: string }
 export interface UpdateDailySlot { id: number; start_time: string; end_time: string }
-export interface UpdateDailySlotReview { id: number; actual_notes: string; met_expectation: 0 | 1; focused: 0 | 1 }
+export interface UpdateDailySlotReview { id: number; actual_notes: string; met_expectation?: 0 | 1; focused: 0 | 1 }
 export interface DailyTemplateSlot { start_time: string; end_time: string; sort_order: number }
 
 

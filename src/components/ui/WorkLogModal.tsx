@@ -4,6 +4,8 @@ import { Alert, Button, Form, Input, Modal, Space, Typography, message } from "a
 import { FileText, KeyRound, Settings } from "lucide-react";
 import MarkdownEditor from "@/components/ui/MarkdownEditor";
 import type { DailyScheduleSlot } from "@/types";
+import { dailyReviewDetails, isDailyReviewComplete } from "@/lib/dailyReview";
+import { useFeaturePreferences } from "@/lib/featurePreferences";
 
 const API_KEY_STORAGE = "lifeplan-ai-api-key";
 const API_URL_STORAGE = "lifeplan-ai-api-url";
@@ -16,7 +18,7 @@ const WORK_LOG_STORAGE_PREFIX = "lifeplan-work-log-";
 const DEFAULT_API_URL = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_MODEL = "gpt-5.6-luna";
 const DEFAULT_LOG_REQUIREMENTS = `1. 要求日志正文 150-250 字左右；
-2. 必须按照“所属项目或产品-行动”维度罗列，不要按照时间段维度罗列，一个行动算一个条目。不要出现“某个时间段安排了某件事”的描述，不用出现是否专注的描述；
+2. 必须按照“所属项目或产品-行动”维度罗列，不要按照时间段维度罗列，一个行动算一个条目。不要出现“某个时间段安排了某件事”的描述，不用出现是否心流的描述；
 3. 统一使用“已完成、进行中、已取消或阻塞”等状态，未完成的算作进行中；
 4. 复盘记录中如有与计划事项不一致的实际工作情况，应如实补充说明；
 5. 下一工作日计划列出当日已安排但未完成的行动；
@@ -61,17 +63,12 @@ function validateAiApiUrl(apiUrl: string) {
   if (private172 && Number(private172[1]) >= 16 && Number(private172[1]) <= 31) throw new Error("不允许使用内网 IPv4 地址作为 AI 接口。");
   if (hostname.includes(":") && /^(fc|fd|fe8|fe9|fea|feb)/.test(hostname)) throw new Error("不允许使用内网 IPv6 地址作为 AI 接口。");
 }
-function buildPrompt(date: string, slots: DailyScheduleSlot[], template: string, requirements: string) {
-  const details = slots.map((slot, index) => {
-    const action = slot.action?.title || "未安排行动";
-    const status = slot.met_expectation === undefined ? "未填写" : slot.met_expectation === 1 ? "达到预期" : "未达预期";
-    const focus = slot.focused === undefined ? "未填写" : slot.focused === 1 ? "专注" : "未专注";
-    return `${index + 1}. ${slot.start_time}-${slot.end_time}｜行动：${action}｜完成预期：${status}｜专注度：${focus}｜复盘：${slot.actual_notes || "未填写"}`;
-  }).join("\n");
+function buildPrompt(date: string, slots: DailyScheduleSlot[], template: string, requirements: string, includeExpectation: boolean) {
+  const details = dailyReviewDetails(slots, includeExpectation);
   return `请根据 ${date} 的时间安排和逐时段复盘，生成一份中文《工作日志》。不要编造未提供的事实，语气专业、具体、适合直接提交给主管或归档。\n\n复盘数据：\n${details || "当天没有可用的时间段复盘数据。"}\n\n请严格按照下面的日志模板输出，保留模板中的章节和编号；模板内容由用户维护：\n${template}\n\n日志生成要求（请与上述模板同时遵守）：\n${requirements}`;
 }
 
-async function generateWorkLog(apiKey: string, apiUrl: string, model: string, date: string, slots: DailyScheduleSlot[], template: string, requirements: string) {
+async function generateWorkLog(apiKey: string, apiUrl: string, model: string, date: string, slots: DailyScheduleSlot[], template: string, requirements: string, includeExpectation: boolean) {
   validateAiApiUrl(apiUrl);
   const time = new Date().toLocaleString("zh-CN");
   let response: Response;
@@ -79,7 +76,7 @@ async function generateWorkLog(apiKey: string, apiUrl: string, model: string, da
     response = await (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window ? tauriFetch : fetch)(apiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, temperature: 0.7, stream: false, messages: [{ role: "user", content: buildPrompt(date, slots, template, requirements) }] }),
+      body: JSON.stringify({ model, temperature: 0.7, stream: false, messages: [{ role: "user", content: buildPrompt(date, slots, template, requirements, includeExpectation) }] }),
     });
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
@@ -130,6 +127,7 @@ function buildRichClipboard(rawHtml: string): { html: string; text: string } {
 }
 
 export default function WorkLogModal({ date, slots, onClose }: { date: string; slots: DailyScheduleSlot[]; onClose: () => void }) {
+  const { features } = useFeaturePreferences();
   const [apiKey, setApiKey] = useState(() => readSetting(API_KEY_STORAGE, ""));
   const [apiUrl, setApiUrl] = useState(() => readSetting(API_URL_STORAGE, DEFAULT_API_URL));
   const [model, setModel] = useState(() => readSetting(MODEL_STORAGE, DEFAULT_MODEL));
@@ -156,7 +154,7 @@ export default function WorkLogModal({ date, slots, onClose }: { date: string; s
   };
 
 
-  const reviewCount = useMemo(() => slots.filter((slot) => Boolean(slot.actual_notes?.trim()) && slot.met_expectation !== undefined && slot.focused !== undefined).length, [slots]);
+  const reviewCount = useMemo(() => slots.filter(isDailyReviewComplete).length, [slots]);
   useEffect(() => { setContent(localStorage.getItem(`${WORK_LOG_STORAGE_PREFIX}${date}`) || ""); }, [date]);
   useEffect(() => {
     if (!apiKey) setSettingsOpen(true);
@@ -204,7 +202,7 @@ export default function WorkLogModal({ date, slots, onClose }: { date: string; s
     if (!apiKey.trim()) { setSettingsOpen(true); return; }
     setGenerating(true);
     setAiError(null);
-    try { const nextContent = await generateWorkLog(apiKey.trim(), apiUrl.trim() || DEFAULT_API_URL, model.trim() || DEFAULT_MODEL, date, slots, logTemplate.trim() || DEFAULT_LOG_TEMPLATE, logRequirements.trim() || DEFAULT_LOG_REQUIREMENTS); setContent(nextContent); localStorage.setItem(`${WORK_LOG_STORAGE_PREFIX}${date}`, nextContent); }
+    try { const nextContent = await generateWorkLog(apiKey.trim(), apiUrl.trim() || DEFAULT_API_URL, model.trim() || DEFAULT_MODEL, date, slots, logTemplate.trim() || DEFAULT_LOG_TEMPLATE, logRequirements.trim() || DEFAULT_LOG_REQUIREMENTS, features.reviewExpectation); setContent(nextContent); localStorage.setItem(`${WORK_LOG_STORAGE_PREFIX}${date}`, nextContent); }
     catch (cause) {
       const error = cause as AiError;
       const normalized = error?.summary ? error : { summary: "AI 请求失败", detail: cause instanceof Error ? cause.message : String(cause), url: apiUrl, model, time: new Date().toLocaleString("zh-CN") };

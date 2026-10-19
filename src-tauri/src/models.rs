@@ -86,6 +86,31 @@ pub struct WeeklyCategoryDuration {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeeklyActionArrangement {
+    pub list_date: String,
+    pub start_time: String,
+    pub end_time: String,
+    pub actual_notes: Option<String>,
+    pub parallel: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeeklyAction {
+    pub id: i64,
+    pub title: String,
+    pub description: Option<String>,
+    pub event_id: Option<i64>,
+    pub event_title: Option<String>,
+    pub category_name: Option<String>,
+    pub category_color: Option<String>,
+    pub status: i32,
+    pub completed_at: Option<i64>,
+    pub completed_in_week: bool,
+    pub planned_minutes: i64,
+    pub arrangements: Vec<WeeklyActionArrangement>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WeeklySummary {
     pub space_id: String,
     pub week_start: String,
@@ -93,6 +118,7 @@ pub struct WeeklySummary {
     pub updated_at: i64,
     pub total_minutes: i64,
     pub categories: Vec<WeeklyCategoryDuration>,
+    pub items: Vec<WeeklyAction>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -348,7 +374,7 @@ pub struct UpdateDailySlot {
 pub struct UpdateDailySlotReview {
     pub id: i64,
     pub actual_notes: String,
-    pub met_expectation: i32,
+    pub met_expectation: Option<i32>,
     pub focused: i32,
 }
 

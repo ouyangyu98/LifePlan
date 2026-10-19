@@ -15,6 +15,7 @@ import { track } from "@/lib/analytics";
 import { sortDailyActions } from "@/lib/dailyActionSort";
 import { useFeaturePreferences } from "@/lib/featurePreferences";
 import { suggestedEndTime } from "@/lib/dailyScheduleTime";
+import { isDailyReviewComplete } from "@/lib/dailyReview";
 
 const today = () => dayjs().format("YYYY-MM-DD");
 const formatTime = (value: string) => value;
@@ -278,8 +279,9 @@ function PlanCell({ slot, onClick, disabled, onDragStart, onDragEnd }: {
 }
 
 function ReviewCell({ slot, onClick }: { slot: DailyScheduleSlot; onClick: () => void }) {
-  const reviewed = slot.met_expectation !== undefined && slot.focused !== undefined && Boolean(slot.actual_notes);
-  return <button type="button" className={`daily-review-cell daily-cell-button ${reviewed ? "reviewed" : "empty"}`} onClick={onClick}>{reviewed ? <><span className="daily-inline-tags"><Tag color={slot.met_expectation === 1 ? "green" : "red"}>{slot.met_expectation === 1 ? "达到预期" : "未达预期"}</Tag><Tag color={slot.focused === 1 ? "blue" : "red"}>{slot.focused === 1 ? "专注" : "未专注"}</Tag></span><span className="daily-review-summary">{slot.actual_notes}</span></> : <span className="daily-review-placeholder">添加复盘</span>}</button>;
+  const { features } = useFeaturePreferences();
+  const reviewed = isDailyReviewComplete(slot);
+  return <button type="button" className={`daily-review-cell daily-cell-button ${reviewed ? "reviewed" : "empty"}`} onClick={onClick}>{reviewed ? <><span className="daily-inline-tags">{features.reviewExpectation && [0, 1].includes(slot.met_expectation as number) && <Tag color={slot.met_expectation === 1 ? "green" : "red"}>{slot.met_expectation === 1 ? "达到预期" : "未达预期"}</Tag>}<Tag color={slot.focused === 1 ? "blue" : "red"}>{slot.focused === 1 ? "心流" : "未进入心流"}</Tag></span><span className="daily-review-summary">{slot.actual_notes}</span></> : <span className="daily-review-placeholder">添加复盘</span>}</button>;
 }
 
 function HalfHourTimePicker({ value, onChange, className, allowDayEnd = false }: { value?: Dayjs; onChange?: (value: Dayjs | null) => void; className?: string; allowDayEnd?: boolean }) {
@@ -614,6 +616,7 @@ function ActionPickerModal({ slot, slots, aiTask, hasAiTasks, onRemove, onOpenAi
   </AntModal>;
 }
 function DailySlotModal({ slot, onClose, onSaved }: { slot: DailyScheduleSlot | null; onClose: () => void; onSaved: (slot: DailyScheduleSlot) => void }) {
+  const { features } = useFeaturePreferences();
   const [form] = Form.useForm(); const [saving, setSaving] = useState(false); const [completeAfterReview, setCompleteAfterReview] = useState(false);
   useEffect(() => {
     if (!slot) return;
@@ -627,9 +630,33 @@ function DailySlotModal({ slot, onClose, onSaved }: { slot: DailyScheduleSlot | 
     });
   }, [slot, form]);
   if (!slot) return null;
-  const saveReview = async () => { try { setSaving(true); const values = await form.validateFields(["actual_notes", "met_expectation", "focused"]); let reviewed = await dailyScheduleApi.updateReview({ id: slot.id, actual_notes: String(values.actual_notes), met_expectation: Number(values.met_expectation) as 0 | 1, focused: Number(values.focused) as 0 | 1 }); track("完成每日复盘", { met_expectation: Number(values.met_expectation) === 1, focused: Number(values.focused) === 1 }); if (completeAfterReview && slot.action_id) { reviewed = { ...reviewed, action: await actionsApi.complete(slot.action_id) }; } onSaved(reviewed); onClose(); message.success(completeAfterReview ? "复盘已保存，行动已完成" : "复盘已保存"); } catch (cause) { if (cause && typeof cause === "object" && "errorFields" in cause) return; message.error(userFacingError(cause)); } finally { setSaving(false); setCompleteAfterReview(false); } };
+  const saveReview = async () => {
+    try {
+      setSaving(true);
+      const fields = features.reviewExpectation ? ["actual_notes", "met_expectation", "focused"] : ["actual_notes", "focused"];
+      const values = await form.validateFields(fields);
+      const expectation = features.reviewExpectation ? { met_expectation: values.met_expectation as 0 | 1 } : {};
+      let reviewed = await dailyScheduleApi.updateReview({
+        id: slot.id, actual_notes: String(values.actual_notes), focused: values.focused as 0 | 1, ...expectation,
+      });
+      track("完成每日复盘", {
+        focused: values.focused === 1,
+        ...(features.reviewExpectation ? { met_expectation: values.met_expectation === 1 } : {}),
+      });
+      if (completeAfterReview && slot.action_id) reviewed = { ...reviewed, action: await actionsApi.complete(slot.action_id) };
+      onSaved(reviewed);
+      onClose();
+      message.success(completeAfterReview ? "复盘已保存，行动已完成" : "复盘已保存");
+    } catch (cause) {
+      if (cause && typeof cause === "object" && "errorFields" in cause) return;
+      message.error(userFacingError(cause));
+    } finally {
+      setSaving(false);
+      setCompleteAfterReview(false);
+    }
+  };
   const restore = async () => { if (!slot.action_id) return; try { const action = await actionsApi.restore(slot.action_id); onSaved({ ...slot, action }); message.success("行动已恢复"); } catch (cause) { message.error(userFacingError(cause)); } };
-  return <AntModal open title={`时间段详情 · ${slotLabel(slot)}`} onCancel={onClose} footer={null} destroyOnHidden><Form form={form} className="form daily-slot-form" layout="vertical">{slot.action ? <ActionPreview action={slot.action} /> : <div className="daily-action-preview-empty">当前时间段尚未安排行动</div>}<Form.Item name="actual_notes" label="实际工作情况" rules={[{ required: true, whitespace: true, message: "请填写实际工作情况" }]}><Input.TextArea autoSize={{ minRows: 3, maxRows: 5 }} /></Form.Item><div className="form-grid"><Form.Item name="met_expectation" label="是否达到预期" rules={[{ required: true, message: "请选择是否达到预期" }]}><Select options={[{ value: 1, label: "达到预期" }, { value: 0, label: "未达预期" }]} /></Form.Item><Form.Item name="focused" label="是否专注" rules={[{ required: true, message: "请选择是否专注" }]}><Select options={[{ value: 1, label: "专注" }, { value: 0, label: "未专注" }]} /></Form.Item></div><div className="daily-slot-actions"><Space>{slot.action?.status === 0 && <Checkbox checked={completeAfterReview} onChange={(event) => setCompleteAfterReview(event.target.checked)}>已完成行动</Checkbox>}{slot.action?.status === 1 && <Button icon={<RotateCcw size={14} />} onClick={() => void restore()}>恢复行动</Button>}</Space><Space><Button type="primary" onClick={() => void saveReview()} loading={saving}>保存复盘</Button></Space></div></Form></AntModal>;
+  return <AntModal open title={`时间段详情 · ${slotLabel(slot)}`} onCancel={onClose} footer={null} destroyOnHidden><Form form={form} className="form daily-slot-form" layout="vertical">{slot.action ? <ActionPreview action={slot.action} /> : <div className="daily-action-preview-empty">当前时间段尚未安排行动</div>}<Form.Item name="actual_notes" label="实际工作情况" rules={[{ required: true, whitespace: true, message: "请填写实际工作情况" }]}><Input.TextArea autoSize={{ minRows: 3, maxRows: 5 }} /></Form.Item><div className={features.reviewExpectation ? "form-grid" : undefined}>{features.reviewExpectation && <Form.Item name="met_expectation" label="是否达到预期" rules={[{ required: true, message: "请选择是否达到预期" }]}><Select options={[{ value: 1, label: "达到预期" }, { value: 0, label: "未达预期" }]} /></Form.Item>}<Form.Item name="focused" label="是否心流" rules={[{ required: true, message: "请选择是否心流" }]}><Select options={[{ value: 1, label: "心流" }, { value: 0, label: "未进入心流" }]} /></Form.Item></div><div className="daily-slot-actions"><Space>{slot.action?.status === 0 && <Checkbox checked={completeAfterReview} onChange={(event) => setCompleteAfterReview(event.target.checked)}>已完成行动</Checkbox>}{slot.action?.status === 1 && <Button icon={<RotateCcw size={14} />} onClick={() => void restore()}>恢复行动</Button>}</Space><Space><Button type="primary" aria-label="保存复盘" aria-busy={saving} onClick={() => void saveReview()} loading={saving}>保存复盘</Button></Space></div></Form></AntModal>;
 }
 
 function EventActionPicker({ actions, slots, saving, onAssign }: { actions: Action[]; slots: DailyScheduleSlot[]; saving: boolean; onAssign: (id: number) => void }) {

@@ -312,6 +312,46 @@ fn drag_snapshot(state: &AppState) -> serde_json::Value {
 }
 
 #[test]
+fn optional_review_rating_preserves_history_and_accepts_unrated_reviews() {
+    let state = drag_state();
+    for (id, expected) in [(201, Some(1)), (202, Some(0)), (203, None)] {
+        let payload: UpdateDailySlotReview = serde_json::from_value(json!({
+            "id": id, "actual_notes": " Updated notes ", "focused": 1,
+        })).unwrap();
+        let reviewed = daily_schedule::update_review_impl(&state, payload).unwrap();
+        assert_eq!(reviewed.actual_notes.as_deref(), Some("Updated notes"));
+        assert_eq!(reviewed.focused, Some(1));
+        assert_eq!(reviewed.met_expectation, expected);
+    }
+    for rating in [0, 1] {
+        let reviewed = daily_schedule::update_review_impl(&state, UpdateDailySlotReview {
+            id: 203, actual_notes: "Explicit rating".into(), focused: 0, met_expectation: Some(rating),
+        }).unwrap();
+        assert_eq!(reviewed.met_expectation, Some(rating));
+        assert_eq!(reviewed.focused, Some(0));
+    }
+    let before = drag_snapshot(&state);
+    for (notes, focused, rating) in [("Invalid", 1, Some(2)), ("Invalid", 2, None), (" \n ", 1, None)] {
+        assert!(daily_schedule::update_review_impl(&state, UpdateDailySlotReview {
+            id: 201, actual_notes: notes.into(), focused, met_expectation: rating,
+        }).is_err());
+        assert_eq!(drag_snapshot(&state), before);
+    }
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute("INSERT INTO local_spaces (space_id,created_at,updated_at) VALUES ('other',1,1)", []).unwrap();
+        conn.execute("UPDATE settings SET value='other' WHERE key='current_space_id'", []).unwrap();
+    }
+    assert!(daily_schedule::update_review_impl(&state, UpdateDailySlotReview {
+        id: 201, actual_notes: "Wrong space".into(), focused: 1, met_expectation: None,
+    }).is_err());
+    let notes: String = state.db.lock().unwrap().query_row(
+        "SELECT actual_notes FROM daily_schedule_slots WHERE id=201", [], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(notes, "Updated notes");
+}
+
+#[test]
 fn drag_swaps_actions_and_all_review_fields_without_changing_times_or_statuses() {
     let state = drag_state();
     let updated = daily_schedule::move_slot_action_impl(&state, "2026-09-28", 201, 202).unwrap();
@@ -449,6 +489,84 @@ fn weekly_summary_uses_planned_main_action_time_and_keeps_notes_per_week() {
         assert!(weekly_summary::list_records(&conn, None, 12).unwrap().is_empty());
     }
     assert!(weekly_summary::save_note_impl(&state, "2026-09-28".into(), "Wrong space".into(), space).is_err());
+}
+
+#[test]
+fn weekly_items_deduplicate_arrangements_and_use_local_completion_dates_without_writes() {
+    use chrono::{Days, Local, NaiveDate};
+    let state = drag_state();
+    let monday = NaiveDate::from_ymd_opt(2026, 9, 28).unwrap();
+    let boundary = |date: NaiveDate| date.and_hms_opt(0, 0, 0).unwrap()
+        .and_local_timezone(Local).earliest().unwrap().timestamp_millis();
+    let start = boundary(monday);
+    let end = boundary(monday.checked_add_days(Days::new(7)).unwrap());
+    {
+        let conn = state.db.lock().unwrap();
+        let space = current_space_id(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO actions(id,space_id,sync_id,title,status,completed_at,created_at,updated_at)
+             VALUES (103,?1,'week-unscheduled','Unscheduled completion',1,?2,1,1),
+                    (104,?1,'week-old','Completed before week',1,?3,1,1),
+                    (105,?1,'week-next','Next Monday',1,?4,1,1),
+                    (106,?1,'week-restored','Restored',0,?2,1,1),
+                    (107,?1,'week-deleted','Deleted',1,?2,1,1),
+                    (108,?1,'week-ai','Parallel research',0,NULL,1,1),
+                    (109,?1,'week-ai-deleted','Removed attachment',0,NULL,1,1)",
+            params![space, start, start - 1, end],
+        ).unwrap();
+        conn.execute("UPDATE actions SET deleted_at=2 WHERE id=107", []).unwrap();
+        conn.execute("UPDATE actions SET status=1,completed_at=?1 WHERE id=102", [end - 1]).unwrap();
+        conn.execute(
+            "INSERT INTO daily_schedule_slots(id,space_id,list_date,start_time,end_time,action_id,actual_notes,created_at,updated_at)
+             VALUES (205,?1,'2026-09-30','13:00','14:00',101,'Second day',1,1),
+                    (206,?1,'2026-09-27','13:00','14:00',101,'Before week',1,1),
+                    (207,?1,'2026-09-30','14:00','15:00',104,'Old completion arranged again',1,1),
+                    (208,?1,'2026-09-30','15:00','16:00',107,'Deleted action',1,1)",
+            [&space],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO ai_tasks(space_id,slot_id,action_id,linked_action_id,list_date,title,result,deleted_at,created_at,updated_at)
+             VALUES (?1,201,101,108,'2026-09-28','Parallel research','Result one',NULL,1,1),
+                    (?1,205,101,108,'2026-09-30','Parallel research','Result two',NULL,1,1),
+                    (?1,201,101,109,'2026-09-28','Removed attachment','',2,1,1)",
+            [&space],
+        ).unwrap();
+    }
+    let before = drag_snapshot(&state);
+    let conn = state.db.lock().unwrap();
+    let summary = weekly_summary::read_summary(&conn, "2026-09-28").unwrap();
+    assert_eq!(summary.items.iter().map(|item| item.id).collect::<Vec<_>>(), vec![101, 102, 103, 104, 108]);
+    let first = &summary.items[0];
+    assert_eq!(first.planned_minutes, 120);
+    assert_eq!(first.arrangements.len(), 2);
+    assert_eq!(first.arrangements[0].actual_notes.as_deref(), Some("First review"));
+    assert_eq!(first.arrangements[1].list_date, "2026-09-30");
+    assert_eq!(summary.items.iter().filter(|item| item.completed_in_week).map(|item| item.id).collect::<Vec<_>>(), vec![102, 103]);
+    assert_eq!(summary.items[2].arrangements.len(), 0);
+    assert!(!summary.items[3].completed_in_week);
+    let parallel = summary.items.iter().find(|item| item.id == 108).unwrap();
+    assert_eq!(parallel.planned_minutes, 0);
+    assert_eq!(parallel.arrangements.len(), 2);
+    assert!(parallel.arrangements.iter().all(|entry| entry.parallel));
+    assert_eq!(parallel.arrangements[0].actual_notes.as_deref(), Some("Result one"));
+    assert_eq!(summary.total_minutes, 270);
+    // Completion-only weeks remain reachable from the history even without schedules or notes.
+    let records = weekly_summary::list_records(&conn, None, 12).unwrap();
+    assert_eq!(records[0].week_start, "2026-10-05");
+    assert_eq!(records[0].total_minutes, 0);
+    assert!(weekly_summary::read_summary(&conn, "2026-10-05").unwrap().items.iter().any(|item| item.id == 105 && item.completed_in_week));
+    drop(conn);
+    assert_eq!(drag_snapshot(&state), before);
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute("UPDATE actions SET status=0,completed_at=NULL WHERE id=102", []).unwrap();
+        let restored = weekly_summary::read_summary(&conn, "2026-09-28").unwrap();
+        assert!(!restored.items.iter().find(|item| item.id == 102).unwrap().completed_in_week);
+        conn.execute("INSERT INTO local_spaces (space_id,created_at,updated_at) VALUES ('other',1,1)", []).unwrap();
+        conn.execute("UPDATE settings SET value='other' WHERE key='current_space_id'", []).unwrap();
+        assert!(weekly_summary::read_summary(&conn, "2026-09-28").unwrap().items.is_empty());
+        assert!(weekly_summary::list_records(&conn, None, 12).unwrap().is_empty());
+    }
 }
 
 #[test]

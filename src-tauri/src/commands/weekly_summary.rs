@@ -1,8 +1,9 @@
 use crate::db::{current_space_id, now_millis};
-use crate::models::{WeeklyCategoryDuration, WeeklyRecord, WeeklySummary};
+use crate::models::{WeeklyAction, WeeklyActionArrangement, WeeklyCategoryDuration, WeeklyRecord, WeeklySummary};
 use crate::AppState;
-use chrono::{Datelike, NaiveDate, Weekday};
+use chrono::{Datelike, Days, Local, NaiveDate, Weekday};
 use rusqlite::{params, Connection, OptionalExtension};
+use std::collections::BTreeMap;
 use tauri::State;
 
 const SLOT_MINUTES: &str = "
@@ -87,11 +88,79 @@ fn week_statistics(conn: &Connection, space_id: &str, week_start: &str) -> Resul
     Ok((total_minutes, categories))
 }
 
+fn week_items(conn: &Connection, space_id: &str, week_start: &str) -> Result<Vec<WeeklyAction>, String> {
+    let start = NaiveDate::parse_from_str(week_start, "%Y-%m-%d").map_err(|error| error.to_string())?;
+    let end = start.checked_add_days(Days::new(7)).ok_or("周日期超出范围")?;
+    let local_midnight = |date: NaiveDate| {
+        date.and_hms_opt(0, 0, 0).unwrap().and_local_timezone(Local).earliest()
+            .map(|value| value.timestamp_millis()).ok_or("周日期无法转换为本地时间")
+    };
+    let start_ms = local_midnight(start)?;
+    let end_ms = local_midnight(end)?;
+    // Parallel attachments contribute activity, never additional planned main-action time.
+    let query = format!(
+        "WITH arrangements AS (
+            SELECT s.action_id, s.list_date, s.start_time, s.end_time, s.actual_notes,
+                   0 AS parallel, MAX(0, {SLOT_MINUTES}) AS minutes
+            FROM daily_schedule_slots s
+            WHERE s.space_id=?1 AND s.list_date>=?2 AND s.list_date<date(?2, '+7 days') AND s.action_id IS NOT NULL
+            UNION ALL
+            SELECT t.linked_action_id, t.list_date, s.start_time, s.end_time,
+                   COALESCE(NULLIF(t.result, ''), NULLIF(t.notes, '')), 1, 0
+            FROM ai_tasks t
+            JOIN daily_schedule_slots s ON s.id=t.slot_id AND s.space_id=t.space_id
+                 AND s.list_date=t.list_date AND s.action_id=t.action_id
+            JOIN actions parent ON parent.id=t.action_id AND parent.space_id=t.space_id AND parent.deleted_at IS NULL
+            WHERE t.space_id=?1 AND t.deleted_at IS NULL AND t.list_date>=?2 AND t.list_date<date(?2, '+7 days')
+        )
+        SELECT a.id, a.title, a.description, e.id, e.title, c.name, c.color,
+               a.status, a.completed_at,
+               (a.status=1 AND a.completed_at>=?3 AND a.completed_at<?4),
+               r.list_date, r.start_time, r.end_time, r.actual_notes, r.parallel, r.minutes
+        FROM actions a
+        LEFT JOIN events e ON e.id=a.event_id AND e.space_id=a.space_id AND e.deleted_at IS NULL
+        LEFT JOIN event_categories c ON c.id=e.category_id AND c.space_id=a.space_id
+        LEFT JOIN arrangements r ON r.action_id=a.id
+        WHERE a.space_id=?1 AND a.deleted_at IS NULL
+          AND (r.action_id IS NOT NULL OR (a.status=1 AND a.completed_at>=?3 AND a.completed_at<?4))
+        ORDER BY a.id, r.list_date, r.start_time, r.parallel"
+    );
+    let mut statement = conn.prepare(&query).map_err(|error| error.to_string())?;
+    let mut rows = statement.query(params![space_id, week_start, start_ms, end_ms]).map_err(|error| error.to_string())?;
+    let mut items = BTreeMap::<i64, WeeklyAction>::new();
+    let mut collect = || -> rusqlite::Result<()> {
+        while let Some(row) = rows.next()? {
+            let id: i64 = row.get(0)?;
+            if !items.contains_key(&id) {
+                items.insert(id, WeeklyAction {
+                    id, title: row.get(1)?, description: row.get(2)?, event_id: row.get(3)?,
+                    event_title: row.get(4)?, category_name: row.get(5)?, category_color: row.get(6)?,
+                    status: row.get(7)?, completed_at: row.get(8)?,
+                    completed_in_week: row.get::<_, Option<bool>>(9)?.unwrap_or(false),
+                    planned_minutes: 0, arrangements: Vec::new(),
+                });
+            }
+            if let Some(list_date) = row.get::<_, Option<String>>(10)? {
+                let item = items.get_mut(&id).unwrap();
+                item.planned_minutes += row.get::<_, i64>(15)?;
+                item.arrangements.push(WeeklyActionArrangement {
+                    list_date, start_time: row.get(11)?, end_time: row.get(12)?,
+                    actual_notes: row.get(13)?, parallel: row.get(14)?,
+                });
+            }
+        }
+        Ok(())
+    };
+    collect().map_err(|error| error.to_string())?;
+    Ok(items.into_values().collect())
+}
+
 pub(super) fn read_summary(conn: &Connection, week_start: &str) -> Result<WeeklySummary, String> {
     validate_week_start(week_start)?;
     let space_id = current_space_id(conn).map_err(|error| error.to_string())?;
     let (content, updated_at) = read_note(conn, &space_id, week_start)?;
     let (total_minutes, categories) = week_statistics(conn, &space_id, week_start)?;
+    let items = week_items(conn, &space_id, week_start)?;
     Ok(WeeklySummary {
         space_id,
         week_start: week_start.into(),
@@ -99,6 +168,7 @@ pub(super) fn read_summary(conn: &Connection, week_start: &str) -> Result<Weekly
         updated_at,
         total_minutes,
         categories,
+        items,
     })
 }
 
@@ -173,6 +243,19 @@ pub(super) fn list_records(
                 FROM daily_schedule_slots s
                 JOIN actions a ON a.id=s.action_id AND a.space_id=s.space_id AND a.deleted_at IS NULL
                 WHERE s.space_id=?1
+                UNION
+                SELECT date(t.list_date, printf('-%d days', (CAST(strftime('%w', t.list_date) AS INTEGER) + 6) % 7))
+                FROM ai_tasks t
+                JOIN actions a ON a.id=t.linked_action_id AND a.space_id=t.space_id AND a.deleted_at IS NULL
+                JOIN daily_schedule_slots s ON s.id=t.slot_id AND s.space_id=t.space_id
+                     AND s.list_date=t.list_date AND s.action_id=t.action_id
+                JOIN actions parent ON parent.id=t.action_id AND parent.space_id=t.space_id AND parent.deleted_at IS NULL
+                WHERE t.space_id=?1 AND t.deleted_at IS NULL
+                UNION
+                SELECT date(a.completed_at / 1000, 'unixepoch', 'localtime',
+                    printf('-%d days', (CAST(strftime('%w', a.completed_at / 1000, 'unixepoch', 'localtime') AS INTEGER) + 6) % 7))
+                FROM actions a
+                WHERE a.space_id=?1 AND a.deleted_at IS NULL AND a.status=1 AND a.completed_at IS NOT NULL
             )
             SELECT w.week_start,
                    COALESCE(n.content, ''),

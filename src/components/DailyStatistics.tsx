@@ -70,7 +70,7 @@ export default function DailyStatistics({ date, slots, aiTasks = [] }: { date: s
         <Progress type="circle" size={70} strokeWidth={7} strokeColor="#16846c"
           percent={review.efficientPercentage ?? 0} status="normal"
           format={() => review.efficientPercentage === null ? "--" : `${review.efficientPercentage}%`} />
-        <div><span className="daily-review-metric-label">高效时段占比<Tooltip title={`已复盘中，同时标记为专注且达到预期的时间段占比；按时间段时长计算${features.aiParallel ? "，不含并行 AI 时长" : ""}。`}><Info size={13} tabIndex={0} aria-label="高效时段占比口径" /></Tooltip></span>
+        <div><span className="daily-review-metric-label">心流时段占比<Tooltip title={`标记为心流的时长，占已填写实际工作情况和心流状态的复盘时长的比例${features.aiParallel ? "，不含并行 AI 时长" : ""}。`}><Info size={13} tabIndex={0} aria-label="心流时段占比口径" /></Tooltip></span>
           <strong>{review.reviewedMinutes ? formatDuration(review.efficientMinutes) : "暂无复盘"}</strong>
           <span>已复盘 {formatDuration(review.reviewedMinutes)}</span>
         </div>
@@ -79,7 +79,7 @@ export default function DailyStatistics({ date, slots, aiTasks = [] }: { date: s
         <Progress type="circle" size={70} strokeWidth={7} strokeColor="#437ec4"
           percent={review.reviewCoverage ?? 0} status="normal"
           format={() => review.reviewCoverage === null ? "--" : `${review.reviewCoverage}%`} />
-        <div><span className="daily-review-metric-label">复盘覆盖率<Tooltip title="已完整填写复盘的时长占已安排时长的比例。尚未复盘的时间不会被判为低效。"><Info size={13} tabIndex={0} aria-label="复盘覆盖率口径" /></Tooltip></span>
+        <div><span className="daily-review-metric-label">复盘覆盖率<Tooltip title="已填写实际工作情况和心流状态的时长占已安排时长的比例。尚未复盘的时间不会被判为非心流。"><Info size={13} tabIndex={0} aria-label="复盘覆盖率口径" /></Tooltip></span>
           <strong>{formatDuration(review.reviewedMinutes)}</strong>
           <span>未复盘 {formatDuration(review.plannedMinutes - review.reviewedMinutes)}</span>
         </div>

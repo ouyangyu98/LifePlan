@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { formatDuration, summarizeDailyReview, summarizeDailySchedule } from "../../src/lib/dailyStatistics.ts";
+import { dailyReviewDetails, isDailyReviewComplete } from "../../src/lib/dailyReview.ts";
 
 const slot = (start, end, action) => ({ start_time: start, end_time: end, action });
 const events = [
@@ -9,7 +10,7 @@ const events = [
   { id: 3, category_id: 10, category_name: "工作", category_color: "#1677ff" },
 ];
 
-test("efficiency uses reviewed duration, with coverage separating unreviewed time", () => {
+test("flow uses reviewed duration regardless of expectation, with separate review coverage", () => {
   const action = { id: 1 };
   const review = summarizeDailyReview([
     { ...slot("09:00", "10:00", action), actual_notes: "done", focused: 1, met_expectation: 1 },
@@ -18,10 +19,36 @@ test("efficiency uses reviewed duration, with coverage separating unreviewed tim
     slot("11:00", "13:00", action),
     { ...slot("13:00", "14:00"), actual_notes: "stale", focused: 1, met_expectation: 1 },
   ]);
-  assert.deepEqual(review, { plannedMinutes: 240, reviewedMinutes: 120, efficientMinutes: 60, efficientPercentage: 50, reviewCoverage: 50 });
+  assert.deepEqual(review, { plannedMinutes: 240, reviewedMinutes: 120, efficientMinutes: 90, efficientPercentage: 75, reviewCoverage: 50 });
   assert.equal(summarizeDailyReview([]).efficientPercentage, null);
   assert.equal(summarizeDailyReview([slot("09:00", "10:00", action)]).reviewCoverage, 0);
   assert.equal(summarizeDailyReview([{ ...slot("09:00", "10:00", action), focused: 1, met_expectation: 1, actual_notes: " " }]).reviewedMinutes, 0);
+});
+
+test("unrated reviews remain complete; missing flow and blank notes are not counted", () => {
+  const base = { ...slot("09:00", "10:00", { id: 1 }), actual_notes: "Review", focused: 1 };
+  assert.equal(isDailyReviewComplete(base), true);
+  assert.equal(isDailyReviewComplete({ ...base, met_expectation: null }), true);
+  for (const focused of [null, undefined, 2]) assert.equal(isDailyReviewComplete({ ...base, focused }), false);
+  assert.equal(isDailyReviewComplete({ ...base, actual_notes: " \n " }), false);
+  const stats = summarizeDailyReview([base, { ...base, focused: 0, met_expectation: null }, { ...base, focused: null }]);
+  assert.deepEqual(stats, { plannedMinutes: 180, reviewedMinutes: 120, efficientMinutes: 60, efficientPercentage: 50, reviewCoverage: 66.7 });
+});
+
+test("work log data hides expectation when disabled and uses flow wording", () => {
+  const slots = [
+    { ...slot("09:00", "10:00", { title: "Work" }), actual_notes: "Notes", focused: 1, met_expectation: 0 },
+    { ...slot("10:00", "11:00", {}), focused: 0, met_expectation: null },
+    slot("11:00", "12:00"),
+  ];
+  const hidden = dailyReviewDetails(slots, false);
+  assert.doesNotMatch(hidden, /预期|专注/);
+  assert.match(hidden, /心流状态：心流/);
+  assert.match(hidden, /心流状态：未进入心流/);
+  assert.match(hidden, /心流状态：未填写/);
+  const visible = dailyReviewDetails(slots, true);
+  assert.match(visible, /完成预期：未达预期/);
+  assert.equal((visible.match(/完成预期：未填写/g) || []).length, 2);
 });
 
 test("uses occupied slot duration, not estimates or action completion; repeats count each slot once", () => {

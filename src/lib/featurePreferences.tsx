@@ -9,13 +9,14 @@ export const optionalFeatures = [
   { key: "insights", label: "心得" },
   { key: "weeklySummary", label: "周总结" },
   { key: "dailyStatistics", label: "数据统计" },
+  { key: "reviewExpectation", label: "是否达到预期" },
   { key: "aiParallel", label: "AI 并行" },
 ] as const;
 
 export type FeatureKey = typeof optionalFeatures[number]["key"];
 type Features = Record<FeatureKey, boolean>;
 const storageKey = "lifeplan-optional-features-v1";
-const defaults: Features = { workLog: true, templates: true, rewards: true, pomodoro: true, insights: true, weeklySummary: true, dailyStatistics: true, aiParallel: true };
+const defaults: Features = { workLog: true, templates: true, rewards: true, pomodoro: true, insights: true, weeklySummary: true, dailyStatistics: true, reviewExpectation: true, aiParallel: true };
 
 const FeatureContext = createContext<{
   features: Features;

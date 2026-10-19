@@ -136,6 +136,45 @@ body.pomodoro-floating-mode .app-shell { padding-top: 0; }
 .weekly-summary-notes { margin-top: 28px; padding-top: 22px; border-top: 1px solid #dfe5eb; }
 .weekly-summary-notes > header { margin-bottom: 14px; }
 .weekly-summary-mobile-selector { display: none; }
+.weekly-items { margin-top: 24px; padding-top: 20px; border-top: 1px solid #dfe5eb; min-width: 0; }
+.weekly-items-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+.weekly-items-heading h3 { margin: 0; color: #303b48; font-size: 17px; font-weight: 600; }
+.weekly-items-heading > svg { color: #7a8591; }
+.weekly-items-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.weekly-items-toolbar .ant-segmented { flex: 0 1 auto; min-width: 0; }
+.weekly-items-toolbar .ant-segmented-item-icon { display: inline-flex; align-items: center; vertical-align: middle; }
+.weekly-items-toolbar .ant-input-affix-wrapper { width: 230px; max-width: 100%; }
+.weekly-items-toolbar .ant-input-prefix { color: #8c98a5; }
+.weekly-items-group + .weekly-items-group { margin-top: 16px; }
+.weekly-items-group-heading { display: flex; align-items: baseline; gap: 10px; padding: 0 0 6px; border-bottom: 1px solid #e5e9ee; flex-wrap: wrap; }
+.weekly-items-group-heading h4 { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 13px; font-weight: 600; color: #455365; }
+.weekly-items-category { display: inline-flex; align-items: center; gap: 5px; color: #7a8591; font-size: 11px; overflow-wrap: anywhere; }
+.weekly-items-category i { width: 6px; height: 6px; border-radius: 2px; flex: none; }
+.weekly-items-group ul, .weekly-item-arrangements { margin: 0; padding: 0; list-style: none; }
+.weekly-item-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto 14px; gap: 10px; align-items: center; width: 100%; padding: 11px 6px; border: 0; border-bottom: 1px solid #e9edf1; color: #394857; background: transparent; text-align: left; cursor: pointer; }
+.weekly-item-row:hover { background: #edf4fa; }
+.weekly-item-row:focus-visible { outline: 2px solid #1677ff; outline-offset: -2px; }
+.weekly-item-status { display: flex; color: #9ba5b0; align-self: start; padding-top: 2px; }
+.weekly-item-status.status-1 { color: #16846c; }
+.weekly-item-status.status-2 { color: #ad7a4d; }
+.weekly-item-content { display: grid; gap: 4px; min-width: 0; }
+.weekly-item-title { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.weekly-item-meta { color: #81909f; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.weekly-item-duration { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-variant-numeric: tabular-nums; color: #637283; white-space: nowrap; }
+.weekly-item-open { color: #a4aeb8; }
+.weekly-items-expand { margin-top: 8px; padding-left: 0; }
+.weekly-item-detail-title { margin: 0 0 12px; font-size: 16px; line-height: 1.5; overflow-wrap: anywhere; }
+.weekly-item-detail-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: #7a8591; font-size: 12px; }
+.weekly-item-detail-meta > span { display: inline-flex; align-items: center; gap: 4px; overflow-wrap: anywhere; }
+.weekly-item-description { white-space: pre-wrap; overflow-wrap: anywhere; color: #52606e; }
+.weekly-item-arrangements-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-top: 24px; }
+.weekly-item-arrangements-heading h4 { margin: 0; font-size: 13px; }
+.weekly-item-arrangements-heading > span { color: #7a8591; font-size: 12px; }
+.weekly-item-arrangements { margin-top: 10px; max-height: 360px; overflow-y: auto; }
+.weekly-item-arrangements li { padding: 12px 0; border-top: 1px solid #e9edf1; }
+.weekly-item-arrangements li > div { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: #637283; }
+.weekly-item-arrangements p { margin: 8px 0 0; color: #394857; white-space: pre-wrap; overflow-wrap: anywhere; }
+.weekly-item-arrangements p.is-empty { color: #9ba5b0; font-size: 12px; }
 @media (max-width: 760px) {
   .weekly-summary-page { padding-right: 12px; }
   .weekly-summary-header { align-items: flex-start; flex-direction: column; gap: 12px; }
@@ -151,6 +190,16 @@ body.pomodoro-floating-mode .app-shell { padding-top: 0; }
   .weekly-summary-total { padding: 0; border-right: 0; }
   .weekly-summary-breakdown .daily-statistics-duration-column { width: 74px; }
   .weekly-summary-breakdown .daily-statistics-share-column { width: 44px; }
+  .weekly-items-toolbar { align-items: stretch; flex-direction: column; gap: 10px; }
+  .weekly-items-toolbar .ant-segmented { width: 100%; max-width: 100%; }
+  .weekly-items-toolbar .ant-segmented-group { display: flex; width: 100%; }
+  .weekly-items-toolbar .ant-segmented-item { flex: 1; min-width: 0; }
+  .weekly-items-toolbar .ant-segmented-item-label { min-width: 0; padding-inline: 5px; font-size: 12px; white-space: normal; }
+  .weekly-items-toolbar .ant-segmented-item-icon { display: none; }
+  .weekly-items-toolbar .ant-input-affix-wrapper { width: 100%; }
+  .weekly-item-row { grid-template-columns: 18px minmax(0, 1fr) auto; gap: 8px; padding-inline: 0; }
+  .weekly-item-open { display: none; }
+  .weekly-item-duration { max-width: 86px; white-space: normal; text-align: right; justify-content: flex-end; }
 }
 @container (max-width: 600px) {
   .daily-statistics-content { grid-template-columns: minmax(0, 1fr); gap: 20px; }

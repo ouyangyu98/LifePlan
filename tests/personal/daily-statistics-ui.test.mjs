@@ -100,7 +100,7 @@ test("daily statistics totals, live edits, dates, category errors and responsive
   try {
     await page.goto(`${baseUrl}/#/daily-list`);
     await total("4 小时");
-    await region.getByText("75%", { exact: true }).waitFor();
+    await region.locator(".daily-review-metric").first().getByText("100%", { exact: true }).waitFor();
     await region.locator(".daily-review-statistics").getByText("50%", { exact: true }).waitFor();
     const rows = region.locator("tbody tr");
     assert.deepEqual(await rows.allTextContents(), ["工作2 小时50%", "成长1 小时25%", "未分类1 小时25%"]);

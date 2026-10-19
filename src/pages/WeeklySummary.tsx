@@ -3,6 +3,7 @@ import dayjs from "dayjs";
 import { Alert, Button, Empty, Select, Skeleton, Tooltip, Typography } from "antd";
 import { Check, ChevronLeft, ChevronRight, LoaderCircle } from "lucide-react";
 import MarkdownEditor from "@/components/ui/MarkdownEditor";
+import WeeklyItems from "@/components/WeeklyItems";
 import { formatDuration } from "@/lib/dailyStatistics";
 import { userFacingError } from "@/lib/errors";
 import { loadWeeklyRecords, loadWeeklySummary, saveWeeklySummary } from "@/lib/weeklySummaryPersistence";
@@ -253,6 +254,8 @@ export default function WeeklySummary() {
           <header><div><h3 id="weekly-summary-notes-heading">本周思考</h3><span>写下值得保留的发现、判断和下一步。</span></div></header>
           {loading ? <Skeleton active title={false} paragraph={{ rows: 6 }} /> : summary && <MarkdownEditor value={content} onChange={save} placeholder="写下这一周的思考…" minHeight={300} showToolbar />}
         </section>
+
+        {!loading && summary && <WeeklyItems key={weekStart} items={summary.items ?? []} />}
       </main>
     </div>
   </div>;

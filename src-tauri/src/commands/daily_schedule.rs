@@ -546,10 +546,17 @@ pub fn update_daily_slot_review(
     state: State<'_, AppState>,
     payload: UpdateDailySlotReview,
 ) -> Result<DailyScheduleSlot, String> {
+    update_review_impl(&state, payload)
+}
+
+pub(super) fn update_review_impl(
+    state: &AppState,
+    payload: UpdateDailySlotReview,
+) -> Result<DailyScheduleSlot, String> {
     if payload.actual_notes.trim().is_empty() {
         return Err("实际工作情况不能为空".into());
     }
-    if ![0, 1].contains(&payload.met_expectation) || ![0, 1].contains(&payload.focused) {
+    if payload.met_expectation.is_some_and(|value| ![0, 1].contains(&value)) || ![0, 1].contains(&payload.focused) {
         return Err("复盘选项无效".into());
     }
     let conn = state.db.lock().map_err(|error| error.to_string())?;
@@ -561,7 +568,8 @@ pub fn update_daily_slot_review(
             |row| row.get(0),
         )
         .map_err(|error| error.to_string())?;
-    let changed = conn.execute("UPDATE daily_schedule_slots SET actual_notes = ?1, met_expectation = ?2, focused = ?3, updated_at = ?4 WHERE id = ?5 AND space_id = ?6", params![payload.actual_notes.trim(), payload.met_expectation, payload.focused, now_millis(), payload.id, space_id]).map_err(|error| error.to_string())?;
+    // An omitted optional rating preserves history instead of fabricating or clearing it.
+    let changed = conn.execute("UPDATE daily_schedule_slots SET actual_notes = ?1, met_expectation = COALESCE(?2, met_expectation), focused = ?3, updated_at = ?4 WHERE id = ?5 AND space_id = ?6", params![payload.actual_notes.trim(), payload.met_expectation, payload.focused, now_millis(), payload.id, space_id]).map_err(|error| error.to_string())?;
     if changed == 0 {
         return Err("时间段不存在".into());
     }
