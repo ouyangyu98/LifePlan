@@ -21,7 +21,7 @@ test("weekly summary keeps planned time, weekly notes, history and optional visi
     const arrangement = (date, notes, parallel = false) => ({ list_date: date, start_time: "09:00", end_time: "10:00", actual_notes: notes, parallel });
     const item = (id, overrides = {}) => ({
       id, title: `项目行动 ${id}`, description: null, event_id: 10, event_title: "产品迭代", category_name: "工作", category_color: "#1677ff",
-      status: 0, completed_at: null, completed_in_week: false, planned_minutes: 60,
+      event_completed: false, status: 0, completed_at: null, completed_in_week: false, planned_minutes: 60,
       arrangements: [arrangement("2026-10-05", "推进了一步")], ...overrides,
     });
     const summaries = {
@@ -38,7 +38,10 @@ test("weekly summary keeps planned time, weekly notes, history and optional visi
             completed_at: new Date("2026-10-09T09:00:00").getTime(), completed_in_week: true, planned_minutes: 0, arrangements: [] }),
           item(4, { title: "上周已完成的事项", status: 1, completed_at: new Date("2026-10-02T09:00:00").getTime() }),
           item(5, { title: "并行调研", event_id: 20, event_title: "资料整理", planned_minutes: 0, arrangements: [arrangement("2026-10-07", "调研结果", true)] }),
-          ...Array.from({ length: 7 }, (_, index) => item(index + 6)),
+          ...Array.from({ length: 7 }, (_, index) => item(index + 6, index < 2 ? {
+            event_id: 30, event_title: "学习计划", category_name: "成长", category_color: "#389e0d",
+            event_completed: true, status: 1, planned_minutes: index === 0 ? 180 : 150,
+          } : index === 2 ? { event_id: 40, event_title: "直播压测", planned_minutes: 300 } : {})),
         ],
       },
       "2026-09-28": {
@@ -94,15 +97,43 @@ test("weekly summary keeps planned time, weekly notes, history and optional visi
     await page.getByRole("heading", { name: "周总结", exact: true }).waitFor();
     await page.getByLabel("本周已安排 4 小时", { exact: true }).waitFor();
     assert.deepEqual(await page.locator(".weekly-summary-breakdown tbody tr").allTextContents(), ["工作3 小时75%", "成长1 小时25%"]);
+    const detailWidth = await page.locator(".weekly-summary-detail").evaluate((el) => el.clientWidth);
+    await page.getByRole("button", { name: "收起周记录", exact: true }).click();
+    assert.equal(await page.getByRole("complementary", { name: "周记录" }).getByText("最近周记录", { exact: true }).isVisible(), false);
+    assert.ok(await page.locator(".weekly-summary-detail").evaluate((el) => el.clientWidth) > detailWidth);
+    await page.locator(".md-wysiwyg").fill("收起周记录也可保存");
+    await page.waitForFunction(() => window.weeklyFixture.summaries["2026-10-05"].content === "收起周记录也可保存");
+    await page.getByRole("button", { name: "展开周记录", exact: true }).click();
+    await page.getByText("最近周记录", { exact: true }).waitFor();
     const items = page.getByRole("region", { name: "本周事项", exact: true });
     assert.equal(await page.locator(".weekly-summary-notes").evaluate((el) =>
       Boolean(el.compareDocumentPosition(document.querySelector(".weekly-items")) & Node.DOCUMENT_POSITION_FOLLOWING)), true);
     const showHandled = () => items.getByText("本周处理 11", { exact: true }).click();
     const showCompleted = () => items.getByText("本周完成 2", { exact: true }).click();
     await items.getByText("本周处理 11", { exact: true }).waitFor();
-    assert.equal(await items.locator(".weekly-item-row").count(), 8);
-    await items.getByRole("button", { name: "展开其余 3 项", exact: true }).click();
     assert.equal(await items.locator(".weekly-item-row").count(), 11);
+    assert.equal(await items.locator(".weekly-item-row:visible").count(), 0);
+    assert.equal(await items.locator('.weekly-items-group-toggle[aria-expanded="false"]').count(), 4);
+    await items.getByRole("button", { name: "展开事件：产品迭代", exact: true }).click();
+    assert.equal(await items.getByRole("button", { name: /展开其余|收起事项/ }).count(), 0);
+    assert.deepEqual(await items.locator(".weekly-items-group-title").allTextContents(), ["产品迭代", "学习计划", "直播压测", "资料整理"]);
+    await items.getByLabel("产品迭代本周安排 8 小时", { exact: true }).waitFor();
+    await items.getByLabel("学习计划本周安排 5 小时 30 分钟", { exact: true }).waitFor();
+    const learning = items.locator(".weekly-items-group").filter({ has: page.locator(".weekly-items-group-title", { hasText: "学习计划" }) });
+    await learning.getByText("事件已完成", { exact: true }).waitFor();
+    assert.equal(await items.locator(".weekly-items-group").first().getByText("事件已完成", { exact: true }).count(), 0);
+    assert.deepEqual(await learning.locator(".weekly-item-duration").allTextContents(), ["3 小时", "2 小时 30 分钟"]);
+    await learning.getByRole("button", { name: "展开事件：学习计划", exact: true }).click();
+    await learning.getByRole("button", { name: "收起事件：学习计划", exact: true }).click();
+    assert.equal(await learning.locator(".weekly-item-row:visible").count(), 0);
+    await learning.getByLabel("学习计划本周安排 5 小时 30 分钟", { exact: true }).waitFor();
+    await learning.getByRole("button", { name: "展开事件：学习计划", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    assert.equal(await learning.locator(".weekly-item-row:visible").count(), 2);
+    await items.scrollIntoViewIfNeeded();
+    await shot("weekly-items-expanded.png");
+    await learning.getByRole("button", { name: "收起事件：学习计划", exact: true }).click();
+    await shot("weekly-items-collapsed.png");
     await items.getByRole("button", { name: "查看事项：梳理需求", exact: true }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByText("第一天复盘", { exact: true }).waitFor();
@@ -111,6 +142,9 @@ test("weekly summary keeps planned time, weekly notes, history and optional visi
     await dialog.locator(".ant-modal-close").click();
     await showCompleted();
     assert.equal(await items.locator(".weekly-item-row").count(), 2);
+    assert.deepEqual(await items.locator(".weekly-items-group-title").allTextContents(), ["产品迭代", "独立行动"]);
+    await items.getByLabel("产品迭代本周安排 8 小时", { exact: true }).waitFor();
+    await items.getByRole("button", { name: "展开事件：独立行动", exact: true }).click();
     await items.getByText("临时完成的事项", { exact: true }).waitFor();
     assert.equal(await items.getByText("上周已完成的事项", { exact: true }).count(), 0);
     await items.getByRole("button", { name: "查看事项：临时完成的事项", exact: true }).click();
@@ -120,6 +154,9 @@ test("weekly summary keeps planned time, weekly notes, history and optional visi
     await items.getByText("没有匹配的事项", { exact: true }).waitFor();
     await items.getByRole("textbox", { name: "搜索本周事项" }).fill("");
     await showHandled();
+    await items.getByRole("textbox", { name: "搜索本周事项" }).fill("项目行动 7");
+    await items.getByRole("button", { name: "查看事项：项目行动 7", exact: true }).waitFor();
+    await items.getByLabel("学习计划本周安排 5 小时 30 分钟", { exact: true }).waitFor();
     await items.getByRole("textbox", { name: "搜索本周事项" }).fill("资料整理");
     await items.getByRole("button", { name: "查看事项：并行调研" }).click();
     await dialog.getByText("调研结果", { exact: true }).waitFor();
@@ -138,13 +175,22 @@ test("weekly summary keeps planned time, weekly notes, history and optional visi
     await page.getByRole("button", { name: /^本\s*周$/ }).click();
     await page.waitForFunction(() => document.querySelector(".md-wysiwyg")?.textContent === "这周推进顺利");
     assert.equal(await page.locator(".weekly-summary-record").count(), 2);
+    assert.equal(await items.locator(".weekly-item-row:visible").count(), 0);
 
+    await page.getByRole("button", { name: "收起周记录", exact: true }).click();
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByLabel("选择周记录", { exact: true }).waitFor();
     await items.getByText("本周处理 11", { exact: true }).waitFor();
     await shot("weekly-summary-mobile.png");
     assert.equal(await page.locator(".weekly-summary-page").evaluate((el) => el.scrollWidth <= el.clientWidth), true);
     assert.equal(await items.evaluate((el) => el.scrollWidth <= el.clientWidth), true);
+    await items.getByRole("button", { name: "展开事件：学习计划", exact: true }).click();
+    assert.equal(await learning.locator(".weekly-item-row:visible").count(), 2);
+    await items.getByRole("button", { name: "收起事件：学习计划", exact: true }).click();
+    assert.equal(await learning.locator(".weekly-item-row:visible").count(), 0);
+    await items.scrollIntoViewIfNeeded();
+    await shot("weekly-groups-mobile.png");
+    await items.getByRole("button", { name: "展开事件：产品迭代", exact: true }).click();
     await items.getByRole("button", { name: "查看事项：梳理需求" }).click();
     await dialog.getByText("第一天复盘", { exact: true }).waitFor();
     await shot("weekly-item-mobile.png");
@@ -152,6 +198,8 @@ test("weekly summary keeps planned time, weekly notes, history and optional visi
     await dialog.locator(".ant-modal-close").click();
 
     await page.setViewportSize({ width: 1280, height: 850 });
+    await page.getByRole("button", { name: "展开周记录", exact: true }).click();
+    await page.getByText("最近周记录", { exact: true }).waitFor();
     await page.getByRole("link", { name: "设置", exact: true }).click();
     await page.locator("#feature-aiParallel").click();
     await page.getByRole("link", { name: "周总结", exact: true }).click();

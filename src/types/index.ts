@@ -82,7 +82,7 @@ export interface WeeklyCategoryDuration { id: number | null; name: string; color
 export interface WeeklyActionArrangement { list_date: string; start_time: string; end_time: string; actual_notes: string | null; parallel: boolean }
 export interface WeeklyAction {
   id: number; title: string; description: string | null; event_id: number | null; event_title: string | null;
-  category_name: string | null; category_color: string | null; status: ActionStatus; completed_at: number | null;
+  category_name: string | null; category_color: string | null; event_completed: boolean; status: ActionStatus; completed_at: number | null;
   completed_in_week: boolean; planned_minutes: number; arrangements: WeeklyActionArrangement[];
 }
 export interface WeeklySummary { space_id: string; week_start: string; content: string; updated_at: number; total_minutes: number; categories: WeeklyCategoryDuration[]; items: WeeklyAction[] }

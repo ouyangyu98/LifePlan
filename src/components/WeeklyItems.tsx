@@ -1,19 +1,27 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import dayjs from "dayjs";
 import { Button, Empty, Input, Modal, Segmented, Tag, Tooltip } from "antd";
-import { ArrowUpRight, Bot, Check, ChevronDown, ChevronUp, Circle, CircleCheck, ClipboardList, Info, Search } from "lucide-react";
+import { ArrowUpRight, Bot, Check, ChevronDown, ChevronRight, Circle, CircleCheck, ClipboardList, Info, Search } from "lucide-react";
 import { formatDuration } from "@/lib/dailyStatistics";
 import { useFeaturePreferences } from "@/lib/featurePreferences";
 import type { WeeklyAction } from "@/types";
 
-const PREVIEW_LIMIT = 8;
 const statusLabel = (item: WeeklyAction) => item.status === 1 ? "已完成" : item.status === 2 ? "已放弃" : "待完成";
+
+type EventGroup = {
+  title: string;
+  category: string | null;
+  color: string | null;
+  completed: boolean;
+  minutes: number;
+  items: WeeklyAction[];
+};
 
 export default function WeeklyItems({ items }: { items: WeeklyAction[] }) {
   const { features } = useFeaturePreferences();
   const [view, setView] = useState<"handled" | "completed">("handled");
   const [search, setSearch] = useState("");
-  const [expanded, setExpanded] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Set<number | null>>(() => new Set());
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const arrangementsOf = (item: WeeklyAction) => item.arrangements.filter((entry) => features.aiParallel || !entry.parallel);
   const handled = items.filter((item) => arrangementsOf(item).length > 0);
@@ -22,21 +30,26 @@ export default function WeeklyItems({ items }: { items: WeeklyAction[] }) {
   const query = search.trim().toLocaleLowerCase();
   const filtered = source.filter((item) => [item.title, item.event_title, item.category_name]
     .some((value) => value?.toLocaleLowerCase().includes(query)));
-  const sorted = [...filtered].sort((a, b) => view === "completed"
-    ? (b.completed_at ?? 0) - (a.completed_at ?? 0) || a.id - b.id
-    : b.planned_minutes - a.planned_minutes || a.id - b.id);
-  const visible = expanded ? sorted : sorted.slice(0, PREVIEW_LIMIT);
-  const groups = useMemo(() => {
-    const result = new Map<number | null, { title: string; category: string | null; color: string | null; items: WeeklyAction[] }>();
-    for (const item of visible) {
-      const group = result.get(item.event_id) ?? {
-        title: item.event_title ?? "独立行动", category: item.category_name, color: item.category_color, items: [],
-      };
-      group.items.push(item);
-      result.set(item.event_id, group);
-    }
-    return [...result.entries()];
-  }, [visible]);
+  // Totals describe the whole event's week, not just the current tab or search results.
+  const totals = new Map<number | null, number>();
+  for (const item of items) totals.set(item.event_id, (totals.get(item.event_id) ?? 0) + item.planned_minutes);
+  const grouped = new Map<number | null, EventGroup>();
+  for (const item of filtered) {
+    const group = grouped.get(item.event_id) ?? {
+      title: item.event_title ?? "独立行动", category: item.category_name, color: item.category_color,
+      completed: item.event_id !== null && item.event_completed, minutes: totals.get(item.event_id) ?? 0, items: [],
+    };
+    group.items.push(item);
+    grouped.set(item.event_id, group);
+  }
+  const groups = [...grouped.entries()].sort(([aId, a], [bId, b]) =>
+    b.minutes - a.minutes || (aId ?? Number.MAX_SAFE_INTEGER) - (bId ?? Number.MAX_SAFE_INTEGER));
+  for (const [, group] of groups) group.items.sort((a, b) => b.planned_minutes - a.planned_minutes || a.id - b.id);
+  const toggleGroup = (id: number | null) => setExpandedGroups((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   const selected = items.find((item) => item.id === selectedId);
   return <section className="weekly-items" aria-labelledby="weekly-items-heading">
     <header className="weekly-items-heading">
@@ -46,21 +59,40 @@ export default function WeeklyItems({ items }: { items: WeeklyAction[] }) {
       </Tooltip>
     </header>
     <div className="weekly-items-toolbar">
-      <Segmented<"handled" | "completed"> aria-label="事项范围" value={view} onChange={(value) => { setView(value); setExpanded(false); }}
+      <Segmented<"handled" | "completed"> aria-label="事项范围" value={view} onChange={setView}
         options={[
           { value: "handled", icon: <ClipboardList size={14} />, label: `本周处理 ${handled.length}` },
           { value: "completed", icon: <CircleCheck size={14} />, label: `本周完成 ${completed.length}` },
         ]} />
       <Input aria-label="搜索本周事项" placeholder="搜索事项、事件或分类" prefix={<Search size={14} />} allowClear
-        value={search} onChange={(event) => { setSearch(event.target.value); setExpanded(false); }} />
+        value={search} onChange={(event) => {
+          setSearch(event.target.value);
+          setExpandedGroups(event.target.value.trim() ? new Set(items.map((item) => item.event_id)) : new Set());
+        }} />
     </div>
     {groups.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
       description={query ? "没有匹配的事项" : view === "handled" ? "本周暂无已安排行动" : "本周暂无完成事项"} /> :
       <div className="weekly-items-groups">{groups.map(([id, group]) => <div className="weekly-items-group" key={id ?? "standalone"}>
-        <div className="weekly-items-group-heading"><h4>{group.title}</h4>
-          {group.category && <span className="weekly-items-category"><i style={{ background: group.color ?? "#8c98a5" }} />{group.category}</span>}
-        </div>
-        <ul>{group.items.map((item) => {
+        <h4 className="weekly-items-group-heading">
+          <button type="button" className="weekly-items-group-toggle"
+            aria-label={`${expandedGroups.has(id) ? "收起" : "展开"}事件：${group.title}`}
+            aria-expanded={expandedGroups.has(id)} aria-controls={`weekly-event-items-${id ?? "standalone"}`}
+            onClick={() => toggleGroup(id)}>
+            {expandedGroups.has(id) ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+            <span className="weekly-items-group-label">
+              <span className="weekly-items-group-title">{group.title}</span>
+              {group.category && <span className="weekly-items-category"><i style={{ background: group.color ?? "#8c98a5" }} />{group.category}</span>}
+              {group.completed && <Tooltip title="事件当前已完成；历史数据未单独记录事件完成日期，不推断完成周次。"><Tag color="green">事件已完成</Tag></Tooltip>}
+            </span>
+            <span className="weekly-items-group-total">
+              <span>{group.items.length} 项</span>
+              <Tooltip title={`该事件本周全部主行动的计划安排时长，含当前筛选未显示的行动${features.aiParallel ? "，不叠加 AI 并行时长" : ""}。`}>
+                <span aria-label={`${group.title}本周安排 ${formatDuration(group.minutes)}`}>本周安排 {formatDuration(group.minutes)}</span>
+              </Tooltip>
+            </span>
+          </button>
+        </h4>
+        <ul id={`weekly-event-items-${id ?? "standalone"}`} hidden={!expandedGroups.has(id)}>{group.items.map((item) => {
           const entries = arrangementsOf(item);
           const dates = [...new Set(entries.map((entry) => entry.list_date))];
           return <li key={item.id}><button type="button" className="weekly-item-row" aria-label={`查看事项：${item.title}`} onClick={() => setSelectedId(item.id)}>
@@ -81,10 +113,6 @@ export default function WeeklyItems({ items }: { items: WeeklyAction[] }) {
           </button></li>;
         })}</ul>
       </div>)}</div>}
-    {sorted.length > PREVIEW_LIMIT && <Button type="link" className="weekly-items-expand"
-      icon={expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />} onClick={() => setExpanded(!expanded)}>
-      {expanded ? "收起事项" : `展开其余 ${sorted.length - PREVIEW_LIMIT} 项`}
-    </Button>}
     <Modal open={Boolean(selected)} title="事项详情" onCancel={() => setSelectedId(null)} destroyOnHidden
       footer={<Button onClick={() => setSelectedId(null)}>关闭</Button>} className="weekly-item-modal">
       {selected && <>

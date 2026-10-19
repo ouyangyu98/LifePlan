@@ -570,6 +570,34 @@ fn weekly_items_deduplicate_arrangements_and_use_local_completion_dates_without_
 }
 
 #[test]
+fn weekly_event_completion_uses_parent_status_not_child_completion_or_edit_dates() {
+    let state = drag_state();
+    let active = event(&state, None);
+    let completed = event(&state, None);
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute("UPDATE events SET status=1 WHERE id=?1", [active.id]).unwrap();
+        conn.execute("UPDATE events SET status=5,updated_at=1 WHERE id=?1", [completed.id]).unwrap();
+        conn.execute("UPDATE actions SET event_id=?1 WHERE id=101", [active.id]).unwrap();
+        conn.execute("UPDATE actions SET event_id=?1 WHERE id=102", [completed.id]).unwrap();
+        let summary = weekly_summary::read_summary(&conn, "2026-09-28").unwrap();
+        assert!(!summary.items.iter().find(|item| item.id == 101).unwrap().event_completed);
+        assert!(summary.items.iter().find(|item| item.id == 102).unwrap().event_completed);
+        // Even when every child is completed, only the event's own status is authoritative.
+        conn.execute("UPDATE actions SET status=1 WHERE id=101", []).unwrap();
+        conn.execute("UPDATE events SET updated_at=?1 WHERE id=?2", params![crate::db::now_millis(), completed.id]).unwrap();
+        let summary = weekly_summary::read_summary(&conn, "2026-09-28").unwrap();
+        assert!(!summary.items.iter().find(|item| item.id == 101).unwrap().event_completed);
+        assert!(summary.items.iter().find(|item| item.id == 102).unwrap().event_completed);
+        conn.execute("UPDATE events SET deleted_at=2 WHERE id=?1", [completed.id]).unwrap();
+        let summary = weekly_summary::read_summary(&conn, "2026-09-28").unwrap();
+        let deleted = summary.items.iter().find(|item| item.id == 102).unwrap();
+        assert!(!deleted.event_completed);
+        assert!(deleted.event_id.is_none());
+    }
+}
+
+#[test]
 fn weekly_summary_v23_migration_is_repeatable_and_preserves_existing_data() {
     let mut conn = Connection::open_in_memory().unwrap();
     run_migrations(&mut conn).unwrap();

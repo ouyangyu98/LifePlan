@@ -116,7 +116,8 @@ fn week_items(conn: &Connection, space_id: &str, week_start: &str) -> Result<Vec
         SELECT a.id, a.title, a.description, e.id, e.title, c.name, c.color,
                a.status, a.completed_at,
                (a.status=1 AND a.completed_at>=?3 AND a.completed_at<?4),
-               r.list_date, r.start_time, r.end_time, r.actual_notes, r.parallel, r.minutes
+               r.list_date, r.start_time, r.end_time, r.actual_notes, r.parallel, r.minutes,
+               COALESCE(e.status=5, 0)
         FROM actions a
         LEFT JOIN events e ON e.id=a.event_id AND e.space_id=a.space_id AND e.deleted_at IS NULL
         LEFT JOIN event_categories c ON c.id=e.category_id AND c.space_id=a.space_id
@@ -135,6 +136,7 @@ fn week_items(conn: &Connection, space_id: &str, week_start: &str) -> Result<Vec
                 items.insert(id, WeeklyAction {
                     id, title: row.get(1)?, description: row.get(2)?, event_id: row.get(3)?,
                     event_title: row.get(4)?, category_name: row.get(5)?, category_color: row.get(6)?,
+                    event_completed: row.get(16)?,
                     status: row.get(7)?, completed_at: row.get(8)?,
                     completed_in_week: row.get::<_, Option<bool>>(9)?.unwrap_or(false),
                     planned_minutes: 0, arrangements: Vec::new(),

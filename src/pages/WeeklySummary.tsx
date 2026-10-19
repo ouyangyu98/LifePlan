@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import dayjs from "dayjs";
 import { Alert, Button, Empty, Select, Skeleton, Tooltip, Typography } from "antd";
-import { Check, ChevronLeft, ChevronRight, LoaderCircle } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, LoaderCircle, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import MarkdownEditor from "@/components/ui/MarkdownEditor";
 import WeeklyItems from "@/components/WeeklyItems";
 import { formatDuration } from "@/lib/dailyStatistics";
@@ -36,6 +36,7 @@ export default function WeeklySummary() {
   const [error, setError] = useState("");
   const [hasMore, setHasMore] = useState(true);
   const [content, setContent] = useState("");
+  const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const requestId = useRef(0);
   const mounted = useRef(false);
   const saveTimer = useRef<number | undefined>(undefined);
@@ -203,8 +204,15 @@ export default function WeeklySummary() {
       }))} />
     </div>
 
-    <div className="weekly-summary-layout">
+    <div className={`weekly-summary-layout${historyCollapsed ? " is-history-collapsed" : ""}`}>
       <aside className="weekly-summary-history" aria-label="周记录">
+        <Tooltip title={historyCollapsed ? "展开周记录" : "收起周记录"}>
+          <Button type="text" className="weekly-summary-history-toggle" aria-label={historyCollapsed ? "展开周记录" : "收起周记录"}
+            aria-expanded={!historyCollapsed} aria-controls="weekly-summary-history-content"
+            icon={historyCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+            onClick={() => setHistoryCollapsed((current) => !current)} />
+        </Tooltip>
+        <div id="weekly-summary-history-content" hidden={historyCollapsed}>
         <div className="weekly-summary-history-heading"><span>最近周记录</span><span>{recordsLoading ? "读取中…" : `${records.length} 周`}</span></div>
         <div className="weekly-summary-records">
           {recordsLoading ? <Skeleton active title={false} paragraph={{ rows: 4 }} /> : records.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有周记录" /> : records.map((record) => (
@@ -216,6 +224,7 @@ export default function WeeklySummary() {
           ))}
         </div>
         {hasMore && olderWeek && <Button type="link" className="weekly-summary-more" onClick={() => void loadRecords(olderWeek, true)}>查看更多历史</Button>}
+        </div>
       </aside>
 
       <main className="weekly-summary-detail">

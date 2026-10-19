@@ -103,6 +103,7 @@ pub struct WeeklyAction {
     pub event_title: Option<String>,
     pub category_name: Option<String>,
     pub category_color: Option<String>,
+    pub event_completed: bool,
     pub status: i32,
     pub completed_at: Option<i64>,
     pub completed_in_week: bool,
