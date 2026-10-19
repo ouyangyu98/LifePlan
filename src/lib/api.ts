@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AiTask, NewAiTask, UpdateAiTask } from "@/types";
+import type { AiTask, NewAiTask, UpdateAiTask, DailyEventPool } from "@/types";
 import type { Action, EventCategory, EventCompletionCheck, RewardCheckin, AddDailyListItem, DailyListItem, DailySchedule, DailyScheduleSlot, DailyTemplateSlot, Event, InsightsNote, NewAction, NewEvent, NewEventCategory, NewDailySlot, NewRecurringAction, ProcessEvent, RecurringAction, ReorderDailyList, ReorderEventActions, ReorderRecurringActions, StartupNotice, UpdateAction, UpdateDailySlot, UpdateDailySlotReview, UpdateEvent, UpdateEventCategory, PomodoroRecord, PomodoroStatus, NewReward, Reward, RewardsOverview, UpdateReward, UpdateRecurringAction, WeeklyRecord, WeeklySummary } from "@/types";
 
 type TauriWindow = Window & {
@@ -76,6 +76,14 @@ export const dailyListApi = {
   reorder: (payload: ReorderDailyList) => invokeCommand<DailyListItem[]>("reorder_daily_list", { payload }),
 };
 
+export const dailyEventPoolApi = {
+  get: (listDate: string) => invokeCommand<DailyEventPool>("get_daily_event_pool", { listDate }),
+  save: (listDate: string, spaceId: string, eventIds: number[]) =>
+    invokeCommand<DailyEventPool>("save_daily_event_pool", { payload: { list_date: listDate, space_id: spaceId, event_ids: eventIds } }),
+  assign: (listDate: string, spaceId: string, actionId: number, slotId: number) =>
+    invokeCommand<DailyScheduleSlot>("assign_daily_pool_action", { listDate, spaceId, actionId, slotId }),
+};
+
 export const dailyScheduleApi = {
   get: (listDate: string) => invokeCommand<DailySchedule>("get_daily_schedule", { listDate }),
   usedDates: () => invokeCommand<string[]>("get_daily_used_dates"),
@@ -94,6 +102,7 @@ export const dailyScheduleApi = {
 export const aiTasksApi = {
   list: (listDate: string) => invokeCommand<AiTask[]>("get_ai_tasks", { listDate }),
   create: (payload: NewAiTask) => invokeCommand<AiTask>("create_ai_task", { payload }),
+  createMany: (payloads: NewAiTask[]) => invokeCommand<AiTask[]>("create_ai_tasks", { payloads }),
   update: (payload: UpdateAiTask) => invokeCommand<AiTask>("update_ai_task", { payload }),
   replace: (id: number, linkedActionId: number, expectedUpdatedAt: number) =>
     invokeCommand<AiTask>("replace_ai_task_action", { id, linkedActionId, expectedUpdatedAt }),

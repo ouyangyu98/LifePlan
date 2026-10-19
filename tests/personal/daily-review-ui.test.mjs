@@ -96,7 +96,23 @@ test("optional expectation hides everywhere, preserves history and does not affe
     assert.equal(saved.rating, 0);
 
     await cells.nth(1).click();
+    assert.equal(await dialog.getByLabel("实际工作情况", { exact: true }).inputValue(), "");
+    await dialog.getByRole("button", { name: "保存复盘", exact: true }).click();
+    await dialog.getByText("请记录实际进展，或选择按计划推进", { exact: true }).waitFor();
+    await page.waitForFunction(() => document.querySelector('button[aria-label="保存复盘"]')?.getAttribute("aria-busy") === "false");
+    await dialog.getByRole("button", { name: "按计划推进", exact: true }).click();
+    assert.equal(await dialog.getByLabel("实际工作情况", { exact: true }).inputValue(), "按计划推进");
+    assert.equal(await page.evaluate(() => window.reviewFixture.slots[1].actual_notes), undefined);
+    await dialog.getByRole("button", { name: "保存复盘", exact: true }).click();
+    await cells.nth(1).getByText("按计划推进", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => window.reviewFixture.slots[1].action.status), 0);
+    await cells.nth(1).click();
     await dialog.getByLabel("实际工作情况", { exact: true }).fill("未填预期的新复盘");
+    await dialog.getByRole("button", { name: "按计划推进", exact: true }).click();
+    const confirmation = page.getByRole("dialog", { name: "替换已有复盘内容？", exact: true });
+    await confirmation.getByRole("button", { name: "保留原文", exact: true }).click();
+    await confirmation.waitFor({ state: "hidden" });
+    assert.equal(await dialog.getByLabel("实际工作情况", { exact: true }).inputValue(), "未填预期的新复盘");
     await dialog.locator(".ant-select").click();
     await page.locator(".ant-select-dropdown:visible").getByText("未进入心流", { exact: true }).click();
     await page.locator(".ant-select-dropdown:visible").waitFor({ state: "hidden" });

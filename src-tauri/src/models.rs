@@ -293,6 +293,27 @@ pub struct DailySchedule {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DailyEventPoolEntry {
+    pub event: Event,
+    pub actions: Vec<Action>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DailyEventPool {
+    pub space_id: String,
+    pub list_date: String,
+    pub event_ids: Vec<i64>,
+    pub entries: Vec<DailyEventPoolEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateDailyEventPool {
+    pub space_id: String,
+    pub list_date: String,
+    pub event_ids: Vec<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AiTaskStatus {
     Queued,

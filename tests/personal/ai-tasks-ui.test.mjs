@@ -111,6 +111,20 @@ async function fixture(page) {
           });
           return structuredClone(data.tasks.filter(task => task.list_date === args.listDate).map(withSource));
         }
+        if (cmd === "create_ai_tasks") {
+          if (data.failSave) throw Error("模拟保存失败");
+          if (data.holdSave) await new Promise(resolve => { window.releaseAiSave = resolve; });
+          const pending = [];
+          for (const payload of args.payloads) {
+            if (data.tasks.some(task => task.slot_id === payload.slot_id && task.linked_action_id === payload.linked_action_id)
+              || pending.some(task => task.linked_action_id === payload.linked_action_id)) throw Error("该行动已挂载到这个时间段");
+            if (!actions.some(action => action.id === payload.linked_action_id && action.status === 0)) throw Error("请选择可安排的待办行动");
+            pending.push({ ...payload, id: Math.max(0, ...data.tasks.map(task => task.id)) + pending.length + 1, created_at: 1, updated_at: 1 });
+          }
+          data.tasks.push(...pending);
+          save();
+          return structuredClone(pending.map(withSource));
+        }
         if (cmd === "create_ai_task" || cmd === "update_ai_task") {
           if (data.failSave) throw Error("模拟保存失败");
           if (data.holdSave) await new Promise(resolve => { window.releaseAiSave = resolve; });
@@ -183,8 +197,64 @@ const openAdd = async (page, index = 0) => {
 const chooseAction = async (page, name) => {
   await picker(page).getByRole("button", { name: "平铺视图", exact: true }).click();
   await picker(page).locator(".daily-action-picker-item").filter({ hasText: name }).click();
+  const confirm = picker(page).getByRole("button", { name: "确认挂载 1 项", exact: true });
+  if (await confirm.count()) await confirm.click();
   await picker(page).waitFor({ state: "hidden" });
 };
+
+test("AI multi-select survives search and view changes, saves atomically and remains slot-specific", { timeout: 90000 }, async () => {
+  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await fixture(page);
+  try {
+    await page.goto(`${baseUrl}/#/daily-list`);
+    await openAdd(page);
+    const modal = picker(page);
+    assert.equal(await modal.getByRole("button", { name: "确认挂载 0 项", exact: true }).isDisabled(), true);
+    await modal.getByRole("checkbox", { name: "选择 AI 行动：项目 - 整理竞品材料", exact: true }).check();
+    await modal.getByPlaceholder("搜索事件或行动关键词").fill("学习");
+    await modal.getByRole("checkbox", { name: /选择 AI 行动：学习/ }).check();
+    await modal.getByRole("button", { name: "确认挂载 2 项", exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => window.aiFixture.tasks.length), 0);
+    await modal.getByPlaceholder("搜索事件或行动关键词").fill("");
+    await modal.getByRole("button", { name: "按事件视图", exact: true }).click();
+    await modal.locator(".daily-event-action-parent").filter({ hasText: "项目" }).click();
+    assert.equal(await modal.getByRole("checkbox", { name: "选择 AI 行动：项目 - 整理竞品材料", exact: true }).isChecked(), true);
+    await shot(page, "ai-multi-selected.png");
+    await page.evaluate(() => { window.aiFixture.failSave = true; });
+    await modal.getByRole("button", { name: "确认挂载 2 项", exact: true }).click();
+    await modal.getByText("模拟保存失败", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => window.aiFixture.tasks.length), 0);
+    assert.equal(await modal.getByRole("checkbox", { name: "选择 AI 行动：项目 - 整理竞品材料", exact: true }).isChecked(), true);
+    await page.evaluate(() => { window.aiFixture.failSave = false; });
+    await modal.getByRole("button", { name: "确认挂载 2 项", exact: true }).click();
+    await modal.waitFor({ state: "hidden" });
+    assert.equal(await page.locator(".daily-schedule-row").first().locator(".daily-ai-task").count(), 2);
+    assert.deepEqual(await page.evaluate(() => window.aiFixture.tasks.map(task => [task.slot_id, task.linked_action_id])), [[1, 3], [1, 4]]);
+    assert.equal(await page.evaluate(() => window.aiFixture.slots[0].actual_notes), "需求复盘");
+    assert.equal(await page.evaluate(() => window.aiFixture.actions[0].status), 0);
+    await openAdd(page, 0);
+    assert.equal(await picker(page).getByRole("checkbox").count(), 0);
+    await picker(page).locator(".ant-modal-close").click();
+    await openAdd(page, 1);
+    await picker(page).getByRole("button", { name: "平铺视图", exact: true }).click();
+    assert.equal(await picker(page).getByRole("checkbox").count(), 2);
+    await picker(page).getByRole("checkbox", { name: "选择 AI 行动：项目 - 整理竞品材料", exact: true }).check();
+    await picker(page).getByRole("button", { name: "确认挂载 1 项", exact: true }).click();
+    await picker(page).waitFor({ state: "hidden" });
+    await page.reload();
+    await page.locator(".daily-schedule-row").nth(1).locator(".daily-ai-task").waitFor();
+    assert.equal(await page.locator(".daily-ai-task").count(), 3);
+    await openAdd(page, 1);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await shot(page, "ai-multi-mobile.png");
+    assert.equal(await picker(page).evaluate(el => el.scrollWidth <= el.clientWidth), true);
+    assert.deepEqual(errors, []);
+  } catch (error) { await shot(page, "ai-multi-failure.png"); throw error; }
+  finally { await browser.close(); }
+});
 
 test("completion and restore update every occurrence without changing independent reviews or AI actions", { timeout: 90000 }, async () => {
   const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -342,9 +412,9 @@ test("AI parallel preference hides all entries and metrics without requests or d
       assert.equal(await page.locator(selector).count(), 0, selector);
     }
     assert.equal(await page.getByText("AI 任务加载失败", { exact: true }).count(), 0);
-    assert.match(await page.locator(".daily-review-statistics").textContent(), /高效时段占比.*复盘覆盖率/);
+    assert.match(await page.locator(".daily-review-statistics").textContent(), /心流时段占比.*复盘覆盖率/);
     assert.equal(await page.evaluate(() => window.aiFixture.calls.some(call => call.cmd === "get_ai_tasks")), false);
-    await page.getByLabel("高效时段占比口径", { exact: true }).hover();
+    await page.getByLabel("心流时段占比口径", { exact: true }).hover();
     await page.getByRole("tooltip").waitFor();
     assert.doesNotMatch(await page.getByRole("tooltip").textContent(), /AI/);
     await page.locator(".page-title").hover();
@@ -631,9 +701,9 @@ test("AI entry reuses the action picker with all three sources and retry protect
     assert.deepEqual(await picker(page).locator(".ant-radio-button-wrapper").allTextContents(), originalTabs);
     await picker(page).locator(".daily-event-action-parent").first().waitFor();
     assert.equal(await picker(page).locator(".daily-event-action-parent").count(), 2);
-    await picker(page).getByPlaceholder("搜索行动标题关键词").fill("不存在的行动");
+    await picker(page).getByPlaceholder("搜索事件或行动关键词").fill("不存在的行动");
     await picker(page).getByText("没有符合条件的行动", { exact: true }).waitFor();
-    await picker(page).getByPlaceholder("搜索行动标题关键词").fill("");
+    await picker(page).getByPlaceholder("搜索事件或行动关键词").fill("");
     await shot(page, "shared-ai-picker-desktop.png");
     await page.setViewportSize({ width: 390, height: 844 });
     await shot(page, "shared-ai-picker-mobile.png");
@@ -642,14 +712,15 @@ test("AI entry reuses the action picker with all three sources and retry protect
     await picker(page).locator(".daily-event-action-parent").filter({ hasText: "项目" }).click();
     await page.evaluate(() => { window.aiFixture.failSave = true; });
     await picker(page).locator(".daily-action-picker-item").filter({ hasText: "整理竞品材料" }).click();
+    await picker(page).getByRole("button", { name: "确认挂载 1 项", exact: true }).click();
     await picker(page).getByText("模拟保存失败", { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => window.aiFixture.tasks.length), 0);
     assert.equal(await page.evaluate(() => JSON.stringify(window.aiFixture.slots)), originalSlots);
     await page.evaluate(() => { window.aiFixture.failSave = false; window.aiFixture.holdSave = true; });
-    await picker(page).locator(".daily-action-picker-item").filter({ hasText: "整理竞品材料" }).evaluate(button => { button.click(); button.click(); });
+    await picker(page).getByRole("button", { name: "确认挂载 1 项", exact: true }).evaluate(button => { button.click(); button.click(); });
     await page.waitForFunction(() => typeof window.releaseAiSave === "function");
     assert.equal(await picker(page).getByRole("button", { name: /^取\s*消$/ }).isDisabled(), true);
-    assert.equal(await page.evaluate(() => window.aiFixture.calls.filter(call => call.cmd === "create_ai_task").length), 2);
+    assert.equal(await page.evaluate(() => window.aiFixture.calls.filter(call => call.cmd === "create_ai_tasks").length), 2);
     await page.evaluate(() => { window.aiFixture.holdSave = false; window.releaseAiSave(); });
     await picker(page).waitFor({ state: "hidden" });
 
@@ -780,7 +851,7 @@ test("AI edit shares action details; replacement and removing one occurrence pre
     assert.equal(await page.locator(".daily-schedule-row").first().locator(".daily-ai-task").count(), 0);
     const statsText = await page.locator(".daily-statistics").textContent();
     assert.doesNotMatch(statsText, /执行中|待我确认/);
-    assert.match(statsText, /高效时段占比/);
+    assert.match(statsText, /心流时段占比/);
     await page.locator(".daily-plan-cell").nth(1).click();
     await details().getByRole("button", { name: "移出今日事", exact: true }).click();
     await page.locator(".ant-popconfirm").getByRole("button", { name: /^取\s*消$/ }).click();

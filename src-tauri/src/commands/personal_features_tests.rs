@@ -1,4 +1,4 @@
-use super::{actions, daily_list, daily_schedule, event_categories as categories, events, insights, weekly_summary};
+use super::{actions, daily_event_pool, daily_list, daily_schedule, event_categories as categories, events, insights, weekly_summary};
 use crate::db::{current_space_id, ensure_current_space, migrations, run_migrations, AppState};
 use crate::models::*;
 use rusqlite::{params, Connection};
@@ -595,6 +595,82 @@ fn weekly_event_completion_uses_parent_status_not_child_completion_or_edit_dates
         assert!(!deleted.event_completed);
         assert!(deleted.event_id.is_none());
     }
+}
+
+#[test]
+fn daily_event_pool_is_date_scoped_and_removal_preserves_schedule_reviews_and_actions() {
+    let state = drag_state();
+    let parent = event(&state, None);
+    let space = current_space_id(&state.db.lock().unwrap()).unwrap();
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute("UPDATE events SET status=1 WHERE id=?1", [parent.id]).unwrap();
+        conn.execute("UPDATE actions SET event_id=?1 WHERE id IN (101,102)", [parent.id]).unwrap();
+    }
+    let snapshot = drag_snapshot(&state);
+    let save = |date: &str, ids: Vec<i64>| daily_event_pool::save_pool(&state, UpdateDailyEventPool {
+        space_id: space.clone(), list_date: date.into(), event_ids: ids,
+    });
+    let pool = save("2026-09-28", vec![parent.id]).unwrap();
+    assert_eq!(pool.entries.len(), 1);
+    assert_eq!(pool.entries[0].actions.len(), 2);
+    assert_eq!(pool.entries[0].actions.iter().filter(|action| action.status == 1).count(), 1);
+    assert!(daily_event_pool::read_pool(&state.db.lock().unwrap(), "2026-09-29").unwrap().entries.is_empty());
+    assert!(save("2026-09-28", vec![parent.id, parent.id]).is_err());
+    assert!(save("2026-02-30", vec![parent.id]).is_err());
+    assert!(save("2026-09-28", vec![999999]).is_err());
+    assert_eq!(daily_event_pool::read_pool(&state.db.lock().unwrap(), "2026-09-28").unwrap().event_ids, vec![parent.id]);
+    assert_eq!(drag_snapshot(&state), snapshot);
+    let assigned = daily_event_pool::assign_from_pool(&state, "2026-09-28", &space, 101, 203).unwrap();
+    assert_eq!(assigned.action_id, Some(101));
+    assert_eq!(assigned.action.as_ref().unwrap().event_title.as_deref(), Some("Keep history"));
+    assert!(daily_event_pool::assign_from_pool(&state, "2026-09-28", &space, 101, 204).is_err());
+    assert!(daily_event_pool::assign_from_pool(&state, "2026-09-28", &space, 102, 203).is_err());
+    let scheduled = drag_snapshot(&state);
+    assert!(daily_event_pool::assign_from_pool(&state, "2026-09-28", &space, 101, 201).is_err());
+    assert_eq!(drag_snapshot(&state), scheduled);
+    save("2026-09-28", vec![]).unwrap();
+    assert_eq!(drag_snapshot(&state), scheduled);
+    let conn = state.db.lock().unwrap();
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM actions", [], |row| row.get::<_, i64>(0)).unwrap(), 2);
+    assert_eq!(conn.query_row("SELECT actual_notes FROM daily_schedule_slots WHERE id=201", [], |row| row.get::<_, String>(0)).unwrap(), "First review");
+}
+
+#[test]
+fn daily_pool_rejects_stale_spaces_unavailable_events_and_orphan_reviews() {
+    let state = drag_state();
+    let parent = event(&state, None);
+    let space = current_space_id(&state.db.lock().unwrap()).unwrap();
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute("UPDATE actions SET event_id=?1 WHERE id=101", [parent.id]).unwrap();
+    }
+    let payload = || UpdateDailyEventPool { space_id: space.clone(), list_date: "2026-09-28".into(), event_ids: vec![parent.id] };
+    assert!(daily_event_pool::save_pool(&state, payload()).is_err());
+    state.db.lock().unwrap().execute("UPDATE events SET status=1 WHERE id=?1", [parent.id]).unwrap();
+    daily_event_pool::save_pool(&state, payload()).unwrap();
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute("UPDATE daily_schedule_slots SET actual_notes='Orphan review' WHERE id=203", []).unwrap();
+    }
+    assert!(daily_event_pool::assign_from_pool(&state, "2026-09-28", &space, 101, 203).is_err());
+    let snapshot = drag_snapshot(&state);
+    for status in [3, 4, 5] {
+        state.db.lock().unwrap().execute("UPDATE events SET status=?1 WHERE id=?2", params![status, parent.id]).unwrap();
+        assert!(daily_event_pool::assign_from_pool(&state, "2026-09-28", &space, 101, 203).is_err());
+        // Existing memberships remain readable and removable after event status changes.
+        assert_eq!(daily_event_pool::read_pool(&state.db.lock().unwrap(), "2026-09-28").unwrap().entries.len(), 1);
+    }
+    {
+        let conn = state.db.lock().unwrap();
+        conn.execute("INSERT INTO local_spaces(space_id,created_at,updated_at) VALUES('other',1,1)", []).unwrap();
+        conn.execute("UPDATE settings SET value='other' WHERE key='current_space_id'", []).unwrap();
+        assert!(daily_event_pool::read_pool(&conn, "2026-09-28").unwrap().entries.is_empty());
+    }
+    assert!(daily_event_pool::save_pool(&state, payload()).is_err());
+    assert!(daily_event_pool::assign_from_pool(&state, "2026-09-28", &space, 101, 203).is_err());
+    state.db.lock().unwrap().execute("UPDATE settings SET value=?1 WHERE key='current_space_id'", [&space]).unwrap();
+    assert_eq!(drag_snapshot(&state), snapshot);
 }
 
 #[test]

@@ -1,5 +1,5 @@
 use crate::commands::{
-    actions, ai_tasks, analytics, daily_list, daily_schedule, event_categories, events, insights, pomodoro,
+    actions, ai_tasks, analytics, daily_event_pool, daily_list, daily_schedule, event_categories, events, insights, pomodoro,
     recurring_actions, rewards, system, weekly_summary,
 };
 use crate::db::init_db;
@@ -162,6 +162,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ai_tasks::get_ai_tasks,
             ai_tasks::create_ai_task,
+            ai_tasks::create_ai_tasks,
             ai_tasks::update_ai_task,
             ai_tasks::replace_ai_task_action,
             ai_tasks::delete_ai_task,
@@ -195,6 +196,9 @@ pub fn run() {
             daily_list::remove_daily_list_item,
             daily_list::reorder_daily_list,
             daily_schedule::get_daily_schedule,
+            daily_event_pool::get_daily_event_pool,
+            daily_event_pool::save_daily_event_pool,
+            daily_event_pool::assign_daily_pool_action,
             daily_schedule::get_daily_used_dates,
             daily_schedule::initialize_daily_schedule,
             daily_schedule::create_daily_slot,

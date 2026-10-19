@@ -46,6 +46,53 @@ fn payload() -> NewAiTask {
 }
 
 #[test]
+fn batch_attachments_are_atomic_and_keep_existing_reviews_and_source_progress() {
+    let state = state();
+    let first = payload();
+    let mut second = payload();
+    second.linked_action_id = 104;
+    let tasks = ai_tasks::create_tasks_impl(&state, vec![first.clone(), second.clone()]).unwrap();
+    assert_eq!(tasks.len(), 2);
+    assert_eq!(tasks[0].linked_action_id, 103);
+    assert_eq!(tasks[1].linked_action_id, 104);
+    assert!(ai_tasks::create_tasks_impl(&state, vec![first.clone(), second.clone()]).is_err());
+    assert!(ai_tasks::create_tasks_impl(&state, vec![]).is_err());
+    assert!(ai_tasks::create_tasks_impl(&state, vec![first.clone(); 51]).is_err());
+    assert!(ai_tasks::create_tasks_impl(&state, vec![first.clone(), first.clone()]).is_err());
+    let mut cross_slot = second.clone();
+    cross_slot.slot_id = 202;
+    assert!(ai_tasks::create_tasks_impl(&state, vec![first.clone(), cross_slot]).is_err());
+    let mut cross_day = second.clone();
+    cross_day.list_date = "2026-09-30".into();
+    assert!(ai_tasks::create_tasks_impl(&state, vec![first.clone(), cross_day]).is_err());
+    let mut completed = first.clone();
+    completed.fields.status = AiTaskStatus::Completed;
+    assert!(ai_tasks::create_tasks_impl(&state, vec![completed]).is_err());
+    {
+        let conn = state.db.lock().unwrap();
+        assert_eq!(ai_tasks::list_tasks(&conn, "2026-09-29").unwrap().len(), 2);
+        assert_eq!(conn.query_row("SELECT actual_notes FROM daily_schedule_slots WHERE id=201", [], |row| row.get::<_, String>(0)).unwrap(), "Keep review");
+        assert_eq!(conn.query_row("SELECT SUM(status) FROM actions WHERE id IN (101,103,104)", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+    }
+    // The first insert must roll back when a later action is no longer eligible.
+    let mut valid = first.clone();
+    valid.slot_id = 202;
+    let mut invalid = second.clone();
+    invalid.slot_id = 202;
+    invalid.linked_action_id = 99999;
+    assert!(ai_tasks::create_tasks_impl(&state, vec![valid, invalid]).is_err());
+    {
+        let conn = state.db.lock().unwrap();
+        assert_eq!(ai_tasks::list_tasks(&conn, "2026-09-29").unwrap().len(), 2);
+        conn.execute("INSERT INTO local_spaces(space_id,created_at,updated_at) VALUES('batch-other',1,1)", []).unwrap();
+        conn.execute("UPDATE settings SET value='batch-other' WHERE key='current_space_id'", []).unwrap();
+    }
+    assert!(ai_tasks::create_tasks_impl(&state, vec![first, second]).is_err());
+    let conn = state.db.lock().unwrap();
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM ai_tasks", [], |row| row.get::<_, i64>(0)).unwrap(), 2);
+}
+
+#[test]
 fn completion_is_shared_across_daily_history_but_not_reviews_or_independent_actions() {
     let state = state();
     let child = ai_tasks::create_task_impl(&state, payload()).unwrap();

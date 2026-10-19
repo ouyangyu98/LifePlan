@@ -44,6 +44,43 @@ body.pomodoro-floating-mode .app-shell { padding-top: 0; }
 .inbox-header .page-subtitle { margin-top: 0; }
 .actions-header > .ant-btn { margin-right: 16px; }
 .daily-list-header { align-items: center; margin-bottom: 14px; }
+.daily-title-line { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.daily-title-line .page-title { margin: 0; }
+.daily-pool-trigger.ant-btn { height: 32px; padding-inline: 10px; font-size: 12px; border-color: #dfe5eb; box-shadow: none; }
+.daily-pool-trigger-count { margin-inline: 4px; color: #7a8591; font-size: 11px; }
+.daily-event-pool { padding: 12px 0 16px; margin-bottom: 14px; border-block: 1px solid #dfe5eb; }
+.daily-pool-heading, .daily-pool-heading > div { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.daily-pool-heading { justify-content: space-between; margin-bottom: 12px; }
+.daily-pool-heading strong { color: #394857; font-size: 13px; }
+.daily-pool-progress-label { font-size: 12px; color: #637283; font-variant-numeric: tabular-nums; }
+.daily-pool-heading .ant-progress { width: 90px; min-width: 60px; margin: 0; }
+.daily-pool-events { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; max-height: 260px; overflow-y: auto; padding-right: 4px; }
+.daily-pool-event { min-width: 0; border: 1px solid #e3e8ed; border-radius: 6px; background: #fff; }
+.daily-pool-event-heading { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 8px; border-bottom: 1px solid #edf0f3; }
+.daily-pool-event-name { flex: 1 1 60px; min-width: 0; color: #394857; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.daily-pool-event-heading .ant-tag { margin: 0; font-size: 11px; }
+.daily-pool-event-progress { color: #16846c; font-size: 12px; font-variant-numeric: tabular-nums; }
+.daily-pool-event ul { margin: 0; padding: 4px; list-style: none; }
+.daily-pool-event li { display: flex; align-items: center; gap: 4px; min-height: 32px; border-radius: 4px; }
+.daily-pool-event li:hover { background: #f2f7fc; }
+.daily-pool-action { display: flex; flex: 1; gap: 6px; min-width: 0; align-items: center; padding: 6px 4px; color: #455365; font-size: 12px; }
+.daily-pool-action[draggable="true"] { cursor: grab; }
+.daily-pool-action > svg { flex: none; color: #8c98a5; }
+.daily-pool-action > span { min-width: 0; overflow-wrap: anywhere; }
+.daily-pool-event li.is-completed .daily-pool-action { color: #8c98a5; text-decoration: line-through; }
+.daily-pool-event li.is-completed .daily-pool-action > svg { color: #16846c; }
+.daily-pool-scheduled { color: #8c98a5; font-size: 10px; white-space: nowrap; }
+.daily-pool-no-actions, .daily-pool-empty { display: block; padding: 12px; color: #8c98a5; font-size: 12px; }
+.daily-pool-picker { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; padding: 14px 0; }
+.daily-pool-picker .ant-checkbox-wrapper { padding: 8px; margin: 0; border-bottom: 1px solid #edf0f3; align-items: start; }
+.daily-pool-picker .ant-checkbox-label { overflow-wrap: anywhere; min-width: 0; }
+.daily-pool-picker .ant-tag { margin-inline: 6px 0; }
+@media (max-width: 760px) {
+  .daily-list-header { flex-wrap: wrap; }
+  .daily-title-line { gap: 8px; }
+  .daily-pool-heading { align-items: start; }
+  .daily-pool-heading > div { gap: 6px; }
+}
 .daily-action-select { width: min(360px, 100%); margin-right: 16px; }
 .daily-date-panel { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; margin-right: 0; }
 .daily-date-context.ant-typography { color: #262626; font-size: 14px; line-height: 20px; white-space: nowrap; }
@@ -225,7 +262,13 @@ body.pomodoro-floating-mode .app-shell { padding-top: 0; }
   .daily-statistics-duration-column { width: 75px; }
   .daily-statistics-share-column { width: 48px; }
 }
-.daily-schedule-head, .daily-schedule-row { display: grid; grid-template-columns: 112px minmax(320px, 1.1fr) minmax(380px, 1.25fr); min-width: 812px; }
+.daily-schedule-head, .daily-schedule-row { display: grid; grid-template-columns: 112px minmax(400px, 1.55fr) minmax(300px, 1fr); min-width: 812px; }
+.daily-pool-complete.ant-checkbox-wrapper { padding-left: 6px; flex: none; }
+.daily-review-entry-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; color: #52606e; font-size: 13px; }
+.daily-ai-selection-summary { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; color: #637283; font-size: 12px; }
+.daily-ai-action-choice.ant-checkbox-wrapper { display: flex; align-items: start; gap: 6px; margin: 0; width: 100%; box-sizing: border-box; }
+.daily-ai-action-choice .ant-checkbox-label { flex: 1; min-width: 0; width: 0; }
+.daily-ai-action-choice .ant-checkbox { margin-top: 4px; }
 .daily-schedule-head { position: sticky; z-index: 3; top: 0; border-bottom: 1px solid #f0f0f0; color: #1f1f1f; background: #fafafa; font-size: 14px; font-weight: 600; }
 .daily-schedule-head > div, .daily-schedule-row > * { min-width: 0; }
 .daily-schedule-head > div { display: flex; align-items: center; height: 42px; padding: 0 12px; border-right: 1px solid #f0f0f0; line-height: 20px; }

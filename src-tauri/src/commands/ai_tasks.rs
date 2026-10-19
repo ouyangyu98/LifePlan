@@ -108,6 +108,38 @@ pub fn create_ai_task(state: State<'_, AppState>, payload: NewAiTask) -> Result<
     create_task_impl(&state, payload)
 }
 
+#[tauri::command]
+pub fn create_ai_tasks(state: State<'_, AppState>, payloads: Vec<NewAiTask>) -> Result<Vec<AiTask>, String> {
+    create_tasks_impl(&state, payloads)
+}
+
+pub(super) fn create_tasks_impl(state: &AppState, payloads: Vec<NewAiTask>) -> Result<Vec<AiTask>, String> {
+    if payloads.is_empty() || payloads.len() > 50 {
+        return Err("请选择 1 至 50 个 AI 行动".into());
+    }
+    let first = &payloads[0];
+    let mut seen = std::collections::HashSet::new();
+    for payload in &payloads {
+        if payload.slot_id != first.slot_id || payload.action_id != first.action_id || payload.list_date != first.list_date {
+            return Err("批量挂载必须位于同一个时间段".into());
+        }
+        if !seen.insert(payload.linked_action_id) {
+            return Err("请选择不同的 AI 行动".into());
+        }
+        if !matches!(payload.fields.status, AiTaskStatus::Queued) || !payload.fields.result.trim().is_empty() {
+            return Err("新增 AI 挂载需从等待中开始".into());
+        }
+    }
+    let mut conn = state.db.lock().map_err(|error| error.to_string())?;
+    let tx = conn.transaction().map_err(|error| error.to_string())?;
+    let mut tasks = Vec::with_capacity(payloads.len());
+    for payload in payloads {
+        tasks.push(insert_task(&tx, payload)?);
+    }
+    tx.commit().map_err(|error| error.to_string())?;
+    Ok(tasks)
+}
+
 pub(super) fn create_task_impl(state: &AppState, payload: NewAiTask) -> Result<AiTask, String> {
     let mut conn = state.db.lock().map_err(|error| error.to_string())?;
     let tx = conn.transaction().map_err(|error| error.to_string())?;

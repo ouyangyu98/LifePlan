@@ -2,6 +2,7 @@ pub mod actions;
 pub mod ai_tasks;
 pub mod analytics;
 pub mod daily_list;
+pub mod daily_event_pool;
 pub mod daily_schedule;
 pub mod event_categories;
 pub mod events;

@@ -163,6 +163,8 @@ export interface DailyScheduleSlot {
   sort_order: number;
 }
 export interface DailySchedule { list_date: string; slots: DailyScheduleSlot[] }
+export interface DailyEventPoolEntry { event: Event; actions: Action[] }
+export interface DailyEventPool { space_id: string; list_date: string; event_ids: number[]; entries: DailyEventPoolEntry[] }
 export type AiTaskStatus = "queued" | "running" | "paused" | "ready" | "completed" | "failed";
 export interface AiTaskFields {
   status: AiTaskStatus;

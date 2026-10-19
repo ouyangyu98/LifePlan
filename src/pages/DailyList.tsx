@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import dayjs, { type Dayjs } from "dayjs";
 import { Alert, Button, Checkbox, DatePicker, Empty, Form, Input, InputNumber, Modal as AntModal, Popconfirm, Select, Space, Tag, Tooltip, Dropdown, Typography, Radio, message } from "antd";
-import { ArrowRight, Bot, CalendarDays, ChevronDown, ChevronUp, FileText, GripVertical, ListChecks, Pencil, Plus, RotateCcw, ListTree, Rows3, Unlink } from "lucide-react";
-import { actionsApi, aiTasksApi, dailyScheduleApi, eventsApi, recurringActionsApi } from "@/lib/api";
+import { ArrowRight, Bot, CalendarDays, Check, ChevronDown, ChevronUp, FileText, GripVertical, ListChecks, Pencil, Plus, RotateCcw, ListTree, Rows3, Unlink } from "lucide-react";
+import { actionsApi, aiTasksApi, dailyEventPoolApi, dailyScheduleApi, eventsApi, recurringActionsApi } from "@/lib/api";
 import type { Action, AiTask, DailySchedule, DailyScheduleSlot, DailyTemplateSlot, NewAction, NewRecurringAction, RecurringAction, UpdateRecurringAction } from "@/types";
 import { userFacingError } from "@/lib/errors";
 import WorkLogModal from "@/components/ui/WorkLogModal";
 import DailyStatistics from "@/components/DailyStatistics";
+import DailyEventPool, { actionLabel, POOL_DRAG_TYPE, useDailyEventPool } from "@/components/DailyEventPool";
 import DailyAiTaskEditor, { type AiTaskSelection } from "@/components/DailyAiTaskEditor";
 import { aiTasksBySlot, aiTaskStatuses } from "@/lib/aiTasks";
 import { useDailyAiTasks } from "@/lib/useDailyAiTasks";
@@ -43,6 +44,11 @@ export default function DailyList() {
   const [aiRecordSelection, setAiRecordSelection] = useState<AiTaskSelection | null>(null);
   const [aiPickerSlot, setAiPickerSlot] = useState<DailyScheduleSlot | null>(null);
   const [schedule, setSchedule] = useState<DailySchedule | null>(null);
+  const pool = useDailyEventPool(date, schedule);
+  const [poolOpen, setPoolOpen] = useState(false);
+  const [poolDrag, setPoolDrag] = useState<Action | null>(null);
+  const [poolAssigning, setPoolAssigning] = useState(false);
+  const poolBusy = useRef(false);
   const [usedDates, setUsedDates] = useState<Set<string>>(() => new Set());
   const [selectedSlot, setSelectedSlot] = useState<DailyScheduleSlot | null>(null);
   const [timeSlot, setTimeSlot] = useState<DailyScheduleSlot | null>(null);
@@ -69,6 +75,7 @@ export default function DailyList() {
     }
   };
   useEffect(() => { void load(); return () => { loadVersion.current += 1; }; }, [date]);
+  useEffect(() => { setPoolOpen(false); setPoolDrag(null); }, [date]);
   useEffect(() => { setAiSelection(null); setAiRecordSelection(null); setAiPickerSlot(null); setPickerSlot(null); }, [date, features.aiParallel]);
   useEffect(() => {
     const reviewActionId = (location.state as { reviewActionId?: number } | null)?.reviewActionId;
@@ -88,6 +95,20 @@ export default function DailyList() {
       return slot.action && item.action_id === slot.action.id ? { ...item, action: slot.action } : item;
     }),
   } : current);
+  const assignPoolAction = async (actionId: number, slotId: number) => {
+    if (poolBusy.current || !pool.data || pool.loading || pool.error) throw Error("事件池正在更新，请稍后重试");
+    poolBusy.current = true;
+    setPoolAssigning(true);
+    try {
+      const assigned = await dailyEventPoolApi.assign(date, pool.data.space_id, actionId, slotId);
+      refreshSlot(assigned);
+      message.success("行动已安排，事件池中的行动保留");
+    } finally {
+      poolBusy.current = false;
+      setPoolAssigning(false);
+      setPoolDrag(null);
+    }
+  };
   const attachAiAction = async (action: Action) => {
     if (!features.aiParallel) return;
     if (aiSelection) {
@@ -107,6 +128,26 @@ export default function DailyList() {
     ai.upsert(task);
     setAiPickerSlot(null);
     message.success("AI 任务已挂载");
+  };
+  const attachAiActions = async (actions: Action[]) => {
+    if (!features.aiParallel || !aiPickerSlot?.action || aiSelection) throw Error("挂载位置已改变，请重新打开");
+    const tasks = await aiTasksApi.createMany(actions.map((action) => ({
+      slot_id: aiPickerSlot.id, action_id: aiPickerSlot.action!.id, linked_action_id: action.id,
+      list_date: aiPickerSlot.list_date, status: "queued" as const,
+      start_time: aiPickerSlot.start_time, end_time: aiPickerSlot.end_time, result: "",
+    })));
+    tasks.forEach(ai.upsert);
+    setAiPickerSlot(null);
+    message.success(`已挂载 ${tasks.length} 个 AI 行动`);
+  };
+  const changePoolActionStatus = async (action: Action, completed: boolean) => {
+    const next = await (completed ? actionsApi.complete(action.id) : actionsApi.restore(action.id));
+    setSchedule((current) => current ? {
+      ...current, slots: current.slots.map((slot) => slot.action_id === next.id ? { ...slot, action: next } : slot),
+    } : current);
+    pool.refresh();
+    ai.retry();
+    message.success(completed ? "行动已完成" : "行动已恢复");
   };
   const removeAction = async () => {
     if (aiSelection) {
@@ -154,15 +195,42 @@ export default function DailyList() {
   const prepareInsertedSlot = (index: number) => { const before = slots[index]; if (!before) return; if (before.end_time === "24:00") { message.warning("当天已没有可新增的时间"); return; } setInsertPreset({ startTime: before.end_time, endTime: suggestedEndTime(before.end_time) }); };
 
   return <div className="page daily-list-page">
-    <header className="page-header daily-list-header"><div><Typography.Title level={2} className="page-title">今日事</Typography.Title><Typography.Paragraph className="page-subtitle">按时间安排行动，并在右侧独立记录该计划执行情况的复盘。</Typography.Paragraph></div><div className="daily-date-panel">{isToday && <Tag color="blue" className="daily-today-tag">今天</Tag>}<DatePicker value={dayjs(date)} format="YYYY年MM月DD日" allowClear={false} cellRender={(current, info) => { if (info.type !== "date" || !usedDates.has(dayjs(current).format("YYYY-MM-DD"))) return info.originNode; return <div className="daily-date-cell is-used">{info.originNode}<span className="daily-date-used-dot" aria-label="这天使用过今日事" /></div>; }} onChange={(value) => value && setDate(value.format("YYYY-MM-DD"))} /><Typography.Text className="daily-date-context"><span className="daily-weekday-name">{weekdayName}</span></Typography.Text></div></header>
+    <header className="page-header daily-list-header"><div><div className="daily-title-line"><Typography.Title level={2} className="page-title">今日事</Typography.Title>
+      <Tooltip title="今日事件池"><Button className="daily-pool-trigger" aria-expanded={poolOpen} aria-controls="daily-event-pool" onClick={() => setPoolOpen((value) => !value)}
+        icon={<ListTree size={15} />}>今日事件池{pool.data && <span className="daily-pool-trigger-count">{pool.data.entries.length} 事件 · {pool.completed}/{pool.total}</span>}{poolOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</Button></Tooltip>
+      </div><Typography.Paragraph className="page-subtitle">按时间安排行动，并在右侧独立记录该计划执行情况的复盘。</Typography.Paragraph></div><div className="daily-date-panel">{isToday && <Tag color="blue" className="daily-today-tag">今天</Tag>}<DatePicker value={dayjs(date)} format="YYYY年MM月DD日" allowClear={false} cellRender={(current, info) => { if (info.type !== "date" || !usedDates.has(dayjs(current).format("YYYY-MM-DD"))) return info.originNode; return <div className="daily-date-cell is-used">{info.originNode}<span className="daily-date-used-dot" aria-label="这天使用过今日事" /></div>; }} onChange={(value) => value && setDate(value.format("YYYY-MM-DD"))} /><Typography.Text className="daily-date-context"><span className="daily-weekday-name">{weekdayName}</span></Typography.Text></div></header>
+    {poolOpen && <DailyEventPool key={date} pool={pool} slots={slots} assigning={poolAssigning} onClose={() => setPoolOpen(false)} onDrag={setPoolDrag}
+      onAssign={assignPoolAction} onActionStatus={changePoolActionStatus} onOpenInbox={() => navigate("/inbox")} />}
     {error && <Alert className="page-alert" type="error" showIcon message={error} closable onClose={() => setError("")} />}
     {ai.error && <Alert className="page-alert" type="warning" showIcon message="AI 任务加载失败" description={ai.error} action={<Button size="small" onClick={ai.retry}>重试</Button>} />}
-    {loading ? <div className="card empty">正在加载…</div> : <>{slots.length === 0 ? <div className="card onboarding-empty"><Empty className="empty" description={<div><Typography.Title level={4}>今天还没有安排行动</Typography.Title><Typography.Paragraph type="secondary">先创建一个时间段，再把要做的行动放进去。</Typography.Paragraph><Space><Button type="primary" icon={<Plus size={15} />} onClick={() => setInsertPreset({})}>新增时间段</Button><Button onClick={() => navigate("/inbox")}>去事件篮记录</Button>{features.templates && <Button onClick={() => void saveTemplate()}>保存空模板</Button>}</Space></div>} /></div> : <ScheduleTable key={date} slots={slots} aiTasks={ai.tasks} aiUnavailable={ai.loading || Boolean(ai.error)} onAiTask={(slot, task) => { if (task) setAiSelection({ slot, task }); else setAiPickerSlot(slot); }} onPlan={setPickerSlot} onReview={(slot) => { if (!slot.action) { message.warning({ content: "请先安排行动", className: "daily-review-toast" }); return; } setSelectedSlot(slot); }} onEditTime={setTimeSlot} onInsert={prepareInsertedSlot} onMoved={moveScheduleContent} />}<div className="daily-template-action"><div className="daily-template-action-left"><Button type="text" icon={<Plus size={15} />} onClick={() => setInsertPreset({})}>新增时间段</Button>{features.templates && <Tooltip title="只影响尚未创建日程的未来日期，不修改已有日期"><Button type="text" icon={<CalendarDays size={15} />} onClick={() => void saveTemplate()}>保存模板</Button></Tooltip>}</div>{features.workLog && <Button type="text" className="work-log-trigger" icon={<FileText size={15} />} disabled={slots.length === 0} onClick={() => setWorkLogOpen(true)}>工作日志</Button>}</div></>}
+    {loading ? <div className="card empty">正在加载…</div> : <>
+      {slots.length === 0 ? <div className="card onboarding-empty"><Empty className="empty" description={<div>
+        <Typography.Title level={4}>今天还没有安排行动</Typography.Title>
+        <Typography.Paragraph type="secondary">先创建一个时间段，再把要做的行动放进去。</Typography.Paragraph>
+        <Space><Button type="primary" icon={<Plus size={15} />} onClick={() => setInsertPreset({})}>新增时间段</Button>
+          <Button onClick={() => navigate("/inbox")}>去事件篮记录</Button>
+          {features.templates && <Button onClick={() => void saveTemplate()}>保存空模板</Button>}</Space>
+      </div>} /></div> : <ScheduleTable key={date} slots={slots} aiTasks={ai.tasks}
+        aiUnavailable={ai.loading || Boolean(ai.error)} poolDrag={poolDrag} poolAssigning={poolAssigning} onPoolAssign={assignPoolAction}
+        onAiTask={(slot, task) => { if (task) setAiSelection({ slot, task }); else setAiPickerSlot(slot); }}
+        onPlan={setPickerSlot} onReview={(slot) => {
+          if (!slot.action) { message.warning({ content: "请先安排行动", className: "daily-review-toast" }); return; }
+          setSelectedSlot(slot);
+        }} onEditTime={setTimeSlot} onInsert={prepareInsertedSlot} onMoved={moveScheduleContent} />}
+      <div className="daily-template-action"><div className="daily-template-action-left">
+        <Button type="text" icon={<Plus size={15} />} onClick={() => setInsertPreset({})}>新增时间段</Button>
+        {features.templates && <Tooltip title="只影响尚未创建日程的未来日期，不修改已有日期">
+          <Button type="text" icon={<CalendarDays size={15} />} onClick={() => void saveTemplate()}>保存模板</Button>
+        </Tooltip>}
+      </div>{features.workLog && <Button type="text" className="work-log-trigger" icon={<FileText size={15} />}
+        disabled={slots.length === 0} onClick={() => setWorkLogOpen(true)}>工作日志</Button>}</div>
+    </>}
     <ActionPickerModal slot={activePickerSlot} slots={slots} aiTask={aiSelection?.task}
       hasAiTasks={Boolean(activePickerSlot && ai.tasks.some(task => task.slot_id === activePickerSlot.id))}
       onRemove={removeAction}
       onOpenAiRecords={() => { setAiRecordSelection(aiSelection); setAiSelection(null); }}
       onPickAction={aiPickerSlot || aiSelection ? attachAiAction : undefined}
+      onPickActions={aiPickerSlot && !aiSelection ? attachAiActions : undefined}
       excludedActionIds={aiParentId ? [aiParentId, ...ai.tasks.filter(task => task.slot_id === aiAttachmentSlot?.id && task.action_id === aiParentId && task.id !== aiSelection?.task.id).map(task => task.linked_action_id)] : []}
       onGuideToInbox={() => navigate("/inbox", { state: { guideNewEvent: true } })}
       onClose={() => { setPickerSlot(null); setAiPickerSlot(null); setAiSelection(null); }}
@@ -177,10 +245,13 @@ export default function DailyList() {
   </div>;
 }
 
-function ScheduleTable({ slots, aiTasks, aiUnavailable, onAiTask, onPlan, onReview, onEditTime, onInsert, onMoved }: {
+function ScheduleTable({ slots, aiTasks, aiUnavailable, poolDrag, poolAssigning, onPoolAssign, onAiTask, onPlan, onReview, onEditTime, onInsert, onMoved }: {
   slots: DailyScheduleSlot[];
   aiTasks: AiTask[];
   aiUnavailable: boolean;
+  poolDrag: Action | null;
+  poolAssigning: boolean;
+  onPoolAssign: (actionId: number, slotId: number) => Promise<void>;
   onAiTask: (slot: DailyScheduleSlot, task: AiTask | null) => void;
   onPlan: (slot: DailyScheduleSlot) => void;
   onReview: (slot: DailyScheduleSlot) => void;
@@ -214,12 +285,12 @@ function ScheduleTable({ slots, aiTasks, aiUnavailable, onAiTask, onPlan, onRevi
     }
   };
   const startDrag = (event: DragEvent<HTMLButtonElement>, slot: DailyScheduleSlot) => {
-    if (busy.current || !slot.action) { event.preventDefault(); return; }
+    if (busy.current || poolAssigning || !slot.action) { event.preventDefault(); return; }
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("application/x-lifeplan-slot", String(slot.id));
     setDraggedId(slot.id);
   };
-  return <div className={`daily-schedule-card card${moving ? " is-moving" : ""}`} aria-busy={moving}>
+  return <div className={`daily-schedule-card card${moving || poolAssigning ? " is-moving" : ""}`} aria-busy={moving || poolAssigning}>
     <div className="daily-schedule-head"><div>时间段</div><div>安排行动</div><div>复盘</div></div>
     <div className="daily-schedule-body">{slots.map((slot, index) => {
       const tasks = tasksBySlot.get(slot.id) ?? [];
@@ -227,6 +298,13 @@ function ScheduleTable({ slots, aiTasks, aiUnavailable, onAiTask, onPlan, onRevi
       return <div className={`daily-schedule-row-wrap${expanded ? " has-ai-tasks" : ""}`} key={slot.id}>
       <div className={`daily-schedule-row${expanded ? " has-ai-tasks" : ""}${draggedId === slot.id ? " is-dragging" : ""}${targetId === slot.id ? " is-drop-target" : ""}`}
         onDragOver={(event) => {
+          if (poolDrag) {
+            if (busy.current || poolAssigning || slot.action_id || slot.actual_notes?.trim() || slot.focused != null || slot.met_expectation != null) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "copy";
+            setTargetId(slot.id);
+            return;
+          }
           if (draggedId === null || draggedId === slot.id || busy.current) return;
           event.preventDefault();
           event.dataTransfer.dropEffect = "move";
@@ -234,6 +312,20 @@ function ScheduleTable({ slots, aiTasks, aiUnavailable, onAiTask, onPlan, onRevi
         }}
         onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setTargetId(null); }}
         onDrop={(event) => {
+          if (poolDrag) {
+            event.preventDefault();
+            clearDrag();
+            if (busy.current || poolAssigning) return;
+            try {
+              const payload = JSON.parse(event.dataTransfer.getData(POOL_DRAG_TYPE));
+              if (payload.actionId !== poolDrag.id || payload.date !== slot.list_date) return;
+            } catch { return; }
+            busy.current = true;
+            setMoving(true);
+            void onPoolAssign(poolDrag.id, slot.id).catch((cause) => message.error(userFacingError(cause)))
+              .finally(() => { busy.current = false; setMoving(false); });
+            return;
+          }
           if (draggedId === null) return;
           event.preventDefault();
           const sourceId = draggedId;
@@ -249,7 +341,7 @@ function ScheduleTable({ slots, aiTasks, aiUnavailable, onAiTask, onPlan, onRevi
         </div>
         <div className="daily-plan-stack">
           <div className="daily-plan-main">
-            <PlanCell slot={slot} disabled={moving} onClick={() => { if (!busy.current) onPlan(slot); }} onDragStart={(event) => startDrag(event, slot)} onDragEnd={clearDrag} />
+            <PlanCell slot={slot} disabled={moving || poolAssigning} onClick={() => { if (!busy.current) onPlan(slot); }} onDragStart={(event) => startDrag(event, slot)} onDragEnd={clearDrag} />
             {features.aiParallel && slot.action && <>
               <Tooltip title="添加 AI 任务"><button type="button" className="daily-ai-add" aria-label={`为 ${slot.action.title} 添加 AI 任务`} disabled={moving || aiUnavailable}
                 onClick={() => { if (!busy.current) onAiTask(slot, null); }}><Bot size={15} /></button></Tooltip>
@@ -275,7 +367,7 @@ function PlanCell({ slot, onClick, disabled, onDragStart, onDragEnd }: {
   onDragStart: (event: DragEvent<HTMLButtonElement>) => void; onDragEnd: () => void;
 }) {
   const action = slot.action; const statusClass = !action ? "empty" : action.status === 1 ? "completed" : action.status === 2 ? "abandoned" : "pending";
-  return <button type="button" className={`daily-plan-cell daily-cell-button ${statusClass}`} disabled={disabled} draggable={Boolean(action) && !disabled} onDragStart={onDragStart} onDragEnd={onDragEnd} onClick={onClick}>{action ? <><span className="daily-drag-handle" title="拖动到其他时间段"><GripVertical size={14} aria-hidden="true" /></span><span className={`daily-inline-title ${action.status === 1 ? "completed-title" : ""}`}>{action.title}</span></> : <span className="daily-empty-action">+ 点击安排行动</span>}</button>;
+  return <button type="button" className={`daily-plan-cell daily-cell-button ${statusClass}`} disabled={disabled} draggable={Boolean(action) && !disabled} onDragStart={onDragStart} onDragEnd={onDragEnd} onClick={onClick}>{action ? <><span className="daily-drag-handle" title="拖动到其他时间段"><GripVertical size={14} aria-hidden="true" /></span><span title={actionLabel(action)} className={`daily-inline-title ${action.status === 1 ? "completed-title" : ""}`}>{actionLabel(action)}</span></> : <span className="daily-empty-action">+ 点击安排行动</span>}</button>;
 }
 
 function ReviewCell({ slot, onClick }: { slot: DailyScheduleSlot; onClick: () => void }) {
@@ -367,12 +459,13 @@ function TimeSlotModal({ slot, onClose, onSaved, onDeleted }: { slot: DailySched
   return <AntModal open title={`编辑时间段 · ${slotLabel(slot)}`} onCancel={onClose} footer={null} destroyOnHidden><Form form={form} className="form" layout="vertical" onFinish={(values) => void submit(values)}><div className="form-grid"><Form.Item name="start_time" label="开始时间" rules={[{ required: true, message: "请选择开始时间" }]}><HalfHourTimePicker className="full-width" /></Form.Item><Form.Item name="end_time" label="结束时间" dependencies={["start_time"]} rules={[{ required: true, message: "请选择结束时间" }, ({ getFieldValue }) => ({ validator(_, value) { const start = getFieldValue("start_time") as Dayjs | undefined; if (!value || !start || value.isAfter(start)) return Promise.resolve(); return Promise.reject(new Error("结束时间必须晚于开始时间")); } })]}><HalfHourTimePicker className="full-width" allowDayEnd /></Form.Item></div><div className="form-footer">{slot.action_id ? <Button danger disabled title="请先移除已安排的行动">删除</Button> : <Popconfirm title="确定删除这个时间段吗？" onConfirm={() => void remove()} okText="删除" cancelText="取消"><Button danger loading={saving}>删除</Button></Popconfirm>}{minutesBetween(slot.start_time, slot.end_time) > 30 && <Button onClick={() => void split()} loading={saving}>拆分</Button>}<Button type="primary" htmlType="submit" loading={saving}>保存</Button></div></Form></AntModal>;
 }
 
-function ActionPickerModal({ slot, slots, aiTask, hasAiTasks, onRemove, onOpenAiRecords, onGuideToInbox, onClose, onStartPomodoro, onAssigned, onPickAction, excludedActionIds = [] }: {
+function ActionPickerModal({ slot, slots, aiTask, hasAiTasks, onRemove, onOpenAiRecords, onGuideToInbox, onClose, onStartPomodoro, onAssigned, onPickAction, onPickActions, excludedActionIds = [] }: {
   slot: DailyScheduleSlot | null; slots: DailyScheduleSlot[];
   aiTask?: AiTask; hasAiTasks: boolean; onRemove: () => Promise<void>; onOpenAiRecords: () => void;
   onGuideToInbox: () => void; onClose: () => void; onStartPomodoro: (action: Action) => void;
   onAssigned: (slots: DailyScheduleSlot[]) => void;
-  onPickAction?: (action: Action) => Promise<void>; excludedActionIds?: number[];
+  onPickAction?: (action: Action) => Promise<void>;
+  onPickActions?: (actions: Action[]) => Promise<void>; excludedActionIds?: number[];
 }) {
   const { features } = useFeaturePreferences();
   const isAi = Boolean(onPickAction);
@@ -390,6 +483,7 @@ function ActionPickerModal({ slot, slots, aiTask, hasAiTasks, onRemove, onOpenAi
   const [poolError, setPoolError] = useState("");
   const [poolRetry, setPoolRetry] = useState(0);
   const [pickError, setPickError] = useState("");
+  const [selectedAi, setSelectedAi] = useState<number[]>([]);
   const busy = useRef(false);
   const generatedActions = useRef(new Map<string, Action>());
 
@@ -402,6 +496,7 @@ function ActionPickerModal({ slot, slots, aiTask, hasAiTasks, onRemove, onOpenAi
     setEditingRecurringAction(null);
     setViewing(Boolean(aiTask) || (!isAi && Boolean(slot.action)));
     setPickError("");
+    setSelectedAi([]);
     generatedActions.current.clear();
     void recurringActionsApi.list().then(setRecurringActions).catch((cause) => message.error(userFacingError(cause)));
   }, [slot, isAi, aiTask?.id]);
@@ -419,11 +514,24 @@ function ActionPickerModal({ slot, slots, aiTask, hasAiTasks, onRemove, onOpenAi
     return () => { active = false; };
   }, [slot, poolRetry]);
   const selectableActions = poolActions.filter((action) => action.status === 0 && action.event_id != null && !excludedActionIds.includes(action.id));
-  const visibleActions = selectableActions.filter((action) => action.title.toLowerCase().includes(query.trim().toLowerCase()) || action.description?.toLowerCase().includes(query.trim().toLowerCase()));
+  const visibleActions = selectableActions.filter((action) => [action.title, action.event_title, action.description]
+    .some((text) => text?.toLowerCase().includes(query.trim().toLowerCase())));
   const flatVisibleActions = useMemo(() => sortDailyActions(visibleActions), [visibleActions]);
   const visibleRecurringActions = recurringActions.filter((action) => action.title.toLowerCase().includes(recurringQuery.trim().toLowerCase()));
 
   if (!slot) return null;
+  const multiAi = Boolean(onPickActions) && mode === "existing";
+  const toggleAiAction = (id: number) => setSelectedAi((current) => current.includes(id)
+    ? current.filter((item) => item !== id) : current.length < 50 ? [...current, id] : current);
+  const confirmAiActions = async () => {
+    if (!onPickActions || busy.current || !selectedAi.length) return;
+    const selected = selectedAi.map((id) => selectableActions.find((action) => action.id === id));
+    if (selected.some((action) => !action)) { setPickError("部分行动已不可安排，请重新选择"); return; }
+    busy.current = true; setSaving(true); setPickError("");
+    try { await onPickActions(selected as Action[]); }
+    catch (cause) { setPickError(userFacingError(cause)); }
+    finally { busy.current = false; setSaving(false); }
+  };
   const displayedAction = aiTask ? allActions.find(action => action.id === aiTask.linked_action_id) : slot.action;
   const confirmChange = (content: string) => new Promise<boolean>(resolve => {
     AntModal.confirm({ title: "确认更换行动？", content, okText: "更换行动", cancelText: "取消",
@@ -605,14 +713,53 @@ function ActionPickerModal({ slot, slots, aiTask, hasAiTasks, onRemove, onOpenAi
     {pickError && <Alert className="page-alert" type="error" showIcon message={pickError} />}
     {mode === "existing" && poolLoading && <Typography.Paragraph type="secondary">正在加载…</Typography.Paragraph>}
     {mode === "existing" && poolError && <Alert className="page-alert" type="error" showIcon message="事件篮加载失败" description={poolError} action={<Button size="small" onClick={() => setPoolRetry(value => value + 1)}>重试</Button>} />}
-    {mode === "existing" && !poolLoading && !poolError && (selectableActions.length === 0 ? <div className="daily-action-empty-guide"><div className="daily-action-empty-guide-icon"><ListChecks size={30} strokeWidth={1.8} /></div><Typography.Title level={4}>还没有可以直接安排的行动</Typography.Title><Typography.Paragraph>先创建要做的事，再把事情拆解成一步步能马上开始的行动，然后依次安排到每天，会更容易将事情推进完成。</Typography.Paragraph><div className="daily-action-empty-guide-example"><span>例如</span><span>准备汇报</span><ArrowRight size={14} /><span>整理数据 → 写提纲 → 完成初稿</span></div><Button type="primary" icon={<ArrowRight size={15} />} iconPosition="end" onClick={onGuideToInbox}>去事件篮拆分活动</Button></div> : <><div className="daily-picker-search-row"><Input allowClear value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索行动标题关键词" /><Button type={actionView === "flat" ? "primary" : "default"} ghost={actionView === "flat"} size="middle" icon={<Rows3 size={15} />} aria-label="平铺视图" title="平铺视图" onClick={() => { setActionView("flat"); localStorage.setItem(ACTION_VIEW_STORAGE_KEY, "flat"); }} /><Button type={actionView === "event" ? "primary" : "default"} ghost={actionView === "event"} size="middle" icon={<ListTree size={15} />} aria-label="按事件视图" title="按事件视图" onClick={() => { setActionView("event"); localStorage.setItem(ACTION_VIEW_STORAGE_KEY, "event"); }} /></div><div className={`daily-action-picker-list ${actionView === "event" ? "daily-action-picker-event-list" : ""}`}>{visibleActions.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有符合条件的行动" /> : actionView === "flat" ? flatVisibleActions.map((action, index) => <button className={`daily-action-picker-item ${action.id === slot.action_id ? "selected" : ""}`} type="button" key={action.id} onClick={() => void assign(action.id)} disabled={saving}><ActionPreview action={action} index={index + 1} scheduledToday={slots.some((item) => item.action_id === action.id)} /></button>) : <EventActionPicker actions={visibleActions} slots={slots} saving={saving} onAssign={(id) => void assign(id)} />}</div></>)}
+    {mode === "existing" && !poolLoading && !poolError && (selectableActions.length === 0 ? <div className="daily-action-empty-guide">
+      <div className="daily-action-empty-guide-icon"><ListChecks size={30} strokeWidth={1.8} /></div>
+      <Typography.Title level={4}>还没有可以直接安排的行动</Typography.Title>
+      <Typography.Paragraph>先创建要做的事，再把事情拆解成一步步能马上开始的行动，然后依次安排到每天，会更容易将事情推进完成。</Typography.Paragraph>
+      <div className="daily-action-empty-guide-example"><span>例如</span><span>准备汇报</span><ArrowRight size={14} /><span>整理数据 → 写提纲 → 完成初稿</span></div>
+      <Button type="primary" icon={<ArrowRight size={15} />} iconPosition="end" onClick={onGuideToInbox}>去事件篮拆分活动</Button>
+    </div> : <>
+      <div className="daily-picker-search-row"><Input allowClear value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索事件或行动关键词" />
+        <Button type={actionView === "flat" ? "primary" : "default"} ghost={actionView === "flat"} size="middle" icon={<Rows3 size={15} />}
+          aria-label="平铺视图" title="平铺视图" onClick={() => { setActionView("flat"); localStorage.setItem(ACTION_VIEW_STORAGE_KEY, "flat"); }} />
+        <Button type={actionView === "event" ? "primary" : "default"} ghost={actionView === "event"} size="middle" icon={<ListTree size={15} />}
+          aria-label="按事件视图" title="按事件视图" onClick={() => { setActionView("event"); localStorage.setItem(ACTION_VIEW_STORAGE_KEY, "event"); }} />
+      </div>
+      {multiAi && <div className="daily-ai-selection-summary"><span>已选 {selectedAi.length} 项</span>
+        <Button type="link" size="small" disabled={saving || !selectedAi.length} onClick={() => setSelectedAi([])}>清空选择</Button></div>}
+      <div className={`daily-action-picker-list ${actionView === "event" ? "daily-action-picker-event-list" : ""}`}>
+        {visibleActions.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有符合条件的行动" /> :
+          actionView === "flat" ? flatVisibleActions.map((action, index) => multiAi
+            ? <AiActionChoice key={action.id} action={action} checked={selectedAi.includes(action.id)} disabled={saving}
+                onToggle={() => toggleAiAction(action.id)} index={index + 1} />
+            : <button className={`daily-action-picker-item ${action.id === slot.action_id ? "selected" : ""}`} type="button" key={action.id}
+                onClick={() => void assign(action.id)} disabled={saving}>
+                <ActionPreview action={action} index={index + 1} scheduledToday={slots.some((item) => item.action_id === action.id)} />
+              </button>)
+          : <EventActionPicker actions={visibleActions} slots={slots} saving={saving} onAssign={(id) => void assign(id)}
+              selectedAi={multiAi ? selectedAi : undefined} onToggleAi={toggleAiAction} />}
+      </div>
+    </>)}
     {mode === "recurring" && <><div className="daily-picker-search-row"><Input allowClear value={recurringQuery} onChange={(event) => setRecurringQuery(event.target.value)} placeholder="搜索重复行动标题" /><Button icon={<Plus size={15} />} onClick={() => setMode("new-recurring")}>新增重复行动</Button></div><div className="daily-action-picker-list">{visibleRecurringActions.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={recurringActions.length === 0 ? "还没有重复行动" : "没有符合条件的重复行动"} /> : visibleRecurringActions.map((action, index) => { const actualIndex = recurringActions.findIndex((item) => item.id === action.id); return <div className="daily-recurring-picker-item" key={action.id}><button className="daily-action-picker-item" type="button" onClick={() => void assignRecurring(action.id)} disabled={saving}><RecurringActionPreview action={action} index={index + 1} /></button><div className="daily-recurring-order-actions"><Button type="text" size="small" aria-label="编辑重复行动" title="编辑" icon={<Pencil size={15} />} disabled={saving} onClick={(event) => { event.stopPropagation(); setEditingRecurringAction(action); setMode("edit-recurring"); }} /><Button type="text" size="small" aria-label="上移重复行动" title="上移" icon={<ChevronUp size={15} />} disabled={actualIndex === 0 || saving} onClick={(event) => { event.stopPropagation(); void moveRecurring(action.id, -1); }} /><Button type="text" size="small" aria-label="下移重复行动" title="下移" icon={<ChevronDown size={15} />} disabled={actualIndex === recurringActions.length - 1 || saving} onClick={(event) => { event.stopPropagation(); void moveRecurring(action.id, 1); }} /></div></div>; })}</div></>}
     {mode === "new" && <NewActionForm disabled={saving} onSubmit={async (payload) => {
       if (isAi) { await pickAiAction(() => generatedAction(`new:${JSON.stringify(payload)}`, () => actionsApi.create(payload))); return; }
       try { const action = await actionsApi.create(payload); await assignAction(action); } catch (cause) { message.error(userFacingError(cause)); }
     }} />}
     {(mode === "new-recurring" || mode === "edit-recurring") && <NewRecurringActionForm action={editingRecurringAction} onSubmit={mode === "edit-recurring" ? updateRecurring : createRecurring} />}
-    <div className="form-footer">{mode !== "new-recurring" && mode !== "edit-recurring" && <Button disabled={saving} onClick={onClose}>取消</Button>}{mode === "new" && <Button type="primary" form="daily-new-action-form" htmlType="submit" loading={saving}>创建并安排</Button>}{(mode === "new-recurring" || mode === "edit-recurring") && <>{mode === "edit-recurring" && <Popconfirm title="删除后不可恢复，确认删除吗" onConfirm={() => void deleteRecurring()} okText="删除" cancelText="取消"><Button danger loading={saving}>删除</Button></Popconfirm>}<Button disabled={saving} onClick={() => { setEditingRecurringAction(null); setMode("recurring"); }}>取消</Button><Button type="primary" form="daily-new-recurring-action-form" htmlType="submit" loading={saving}>{mode === "edit-recurring" ? "保存修改" : "保存重复行动"}</Button></>}</div>
+    <div className="form-footer">
+      {mode !== "new-recurring" && mode !== "edit-recurring" && <Button disabled={saving} onClick={onClose}>取消</Button>}
+      {multiAi && <Button type="primary" icon={<Bot size={14} />} aria-label={`确认挂载 ${selectedAi.length} 项`}
+        disabled={!selectedAi.length || poolLoading || Boolean(poolError)} loading={saving}
+        onClick={() => void confirmAiActions()}>确认挂载 {selectedAi.length} 项</Button>}
+      {mode === "new" && <Button type="primary" form="daily-new-action-form" htmlType="submit" loading={saving}>创建并安排</Button>}
+      {(mode === "new-recurring" || mode === "edit-recurring") && <>
+        {mode === "edit-recurring" && <Popconfirm title="删除后不可恢复，确认删除吗" onConfirm={() => void deleteRecurring()} okText="删除" cancelText="取消">
+          <Button danger loading={saving}>删除</Button></Popconfirm>}
+        <Button disabled={saving} onClick={() => { setEditingRecurringAction(null); setMode("recurring"); }}>取消</Button>
+        <Button type="primary" form="daily-new-recurring-action-form" htmlType="submit" loading={saving}>{mode === "edit-recurring" ? "保存修改" : "保存重复行动"}</Button>
+      </>}
+    </div>
   </AntModal>;
 }
 function DailySlotModal({ slot, onClose, onSaved }: { slot: DailyScheduleSlot | null; onClose: () => void; onSaved: (slot: DailyScheduleSlot) => void }) {
@@ -622,14 +769,20 @@ function DailySlotModal({ slot, onClose, onSaved }: { slot: DailyScheduleSlot | 
     if (!slot) return;
     setCompleteAfterReview(false);
     const isNewReview = slot.actual_notes == null && slot.met_expectation == null && slot.focused == null;
-    const defaultActualNotes = slot.action ? `${slot.action.event_title ? `${slot.action.event_title}-` : ""}${slot.action.title}` : "";
     form.setFieldsValue({
-      actual_notes: isNewReview ? defaultActualNotes : slot.actual_notes,
+      actual_notes: slot.actual_notes ?? "",
       met_expectation: isNewReview ? 1 : slot.met_expectation,
       focused: isNewReview ? 1 : slot.focused,
     });
   }, [slot, form]);
   if (!slot) return null;
+  const recordAsPlanned = () => {
+    const notes = String(form.getFieldValue("actual_notes") ?? "").trim();
+    const apply = () => form.setFieldValue("actual_notes", "按计划推进");
+    if (notes && notes !== "按计划推进") {
+      AntModal.confirm({ title: "替换已有复盘内容？", content: "将当前输入替换为“按计划推进”。", okText: "替换", cancelText: "保留原文", onOk: apply });
+    } else apply();
+  };
   const saveReview = async () => {
     try {
       setSaving(true);
@@ -656,10 +809,41 @@ function DailySlotModal({ slot, onClose, onSaved }: { slot: DailyScheduleSlot | 
     }
   };
   const restore = async () => { if (!slot.action_id) return; try { const action = await actionsApi.restore(slot.action_id); onSaved({ ...slot, action }); message.success("行动已恢复"); } catch (cause) { message.error(userFacingError(cause)); } };
-  return <AntModal open title={`时间段详情 · ${slotLabel(slot)}`} onCancel={onClose} footer={null} destroyOnHidden><Form form={form} className="form daily-slot-form" layout="vertical">{slot.action ? <ActionPreview action={slot.action} /> : <div className="daily-action-preview-empty">当前时间段尚未安排行动</div>}<Form.Item name="actual_notes" label="实际工作情况" rules={[{ required: true, whitespace: true, message: "请填写实际工作情况" }]}><Input.TextArea autoSize={{ minRows: 3, maxRows: 5 }} /></Form.Item><div className={features.reviewExpectation ? "form-grid" : undefined}>{features.reviewExpectation && <Form.Item name="met_expectation" label="是否达到预期" rules={[{ required: true, message: "请选择是否达到预期" }]}><Select options={[{ value: 1, label: "达到预期" }, { value: 0, label: "未达预期" }]} /></Form.Item>}<Form.Item name="focused" label="是否心流" rules={[{ required: true, message: "请选择是否心流" }]}><Select options={[{ value: 1, label: "心流" }, { value: 0, label: "未进入心流" }]} /></Form.Item></div><div className="daily-slot-actions"><Space>{slot.action?.status === 0 && <Checkbox checked={completeAfterReview} onChange={(event) => setCompleteAfterReview(event.target.checked)}>已完成行动</Checkbox>}{slot.action?.status === 1 && <Button icon={<RotateCcw size={14} />} onClick={() => void restore()}>恢复行动</Button>}</Space><Space><Button type="primary" aria-label="保存复盘" aria-busy={saving} onClick={() => void saveReview()} loading={saving}>保存复盘</Button></Space></div></Form></AntModal>;
+  return <AntModal open title={`时间段详情 · ${slotLabel(slot)}`} onCancel={onClose} footer={null} destroyOnHidden>
+    <Form form={form} className="form daily-slot-form" layout="vertical">
+      {slot.action ? <ActionPreview action={slot.action} /> : <div className="daily-action-preview-empty">当前时间段尚未安排行动</div>}
+      <div className="daily-review-entry-heading"><span>本时段进展</span>
+        <Button size="small" icon={<Check size={14} />} disabled={saving} onClick={recordAsPlanned}>按计划推进</Button></div>
+      <Form.Item name="actual_notes" label="实际工作情况" rules={[{ required: true, whitespace: true, message: "请记录实际进展，或选择按计划推进" }]}>
+        <Input.TextArea disabled={saving} placeholder="推进到哪一步、临时改做了什么、遇到什么阻碍…" autoSize={{ minRows: 3, maxRows: 5 }} />
+      </Form.Item>
+      <div className={features.reviewExpectation ? "form-grid" : undefined}>
+        {features.reviewExpectation && <Form.Item name="met_expectation" label="是否达到预期" rules={[{ required: true, message: "请选择是否达到预期" }]}>
+          <Select disabled={saving} options={[{ value: 1, label: "达到预期" }, { value: 0, label: "未达预期" }]} /></Form.Item>}
+        <Form.Item name="focused" label="是否心流" rules={[{ required: true, message: "请选择是否心流" }]}>
+          <Select disabled={saving} options={[{ value: 1, label: "心流" }, { value: 0, label: "未进入心流" }]} /></Form.Item>
+      </div>
+      <div className="daily-slot-actions"><Space>
+        {slot.action?.status === 0 && <Checkbox disabled={saving} checked={completeAfterReview} onChange={(event) => setCompleteAfterReview(event.target.checked)}>已完成行动</Checkbox>}
+        {slot.action?.status === 1 && <Button icon={<RotateCcw size={14} />} disabled={saving} onClick={() => void restore()}>恢复行动</Button>}
+      </Space><Button type="primary" aria-label="保存复盘" aria-busy={saving} onClick={() => void saveReview()} loading={saving}>保存复盘</Button></div>
+    </Form>
+  </AntModal>;
 }
 
-function EventActionPicker({ actions, slots, saving, onAssign }: { actions: Action[]; slots: DailyScheduleSlot[]; saving: boolean; onAssign: (id: number) => void }) {
+function AiActionChoice({ action, checked, disabled, onToggle, index, hideEvent = false }: {
+  action: Action; checked: boolean; disabled: boolean; onToggle: () => void; index: number; hideEvent?: boolean;
+}) {
+  return <Checkbox className={`daily-action-picker-item daily-ai-action-choice${checked ? " selected" : ""}`}
+    aria-label={`选择 AI 行动：${actionLabel(action)}`} checked={checked} disabled={disabled} onChange={onToggle}>
+    <ActionPreview action={action} index={index} hideEventRelation={hideEvent} hideEventActionMeta={hideEvent} />
+  </Checkbox>;
+}
+
+function EventActionPicker({ actions, slots, saving, onAssign, selectedAi, onToggleAi }: {
+  actions: Action[]; slots: DailyScheduleSlot[]; saving: boolean; onAssign: (id: number) => void;
+  selectedAi?: number[]; onToggleAi?: (id: number) => void;
+}) {
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set());
   const groups = actions.filter((action) => action.status !== 1).reduce<Array<{ key: string; eventTitle: string; actions: Action[] }>>((result, action) => {
     const key = action.event_id != null ? `event:${action.event_id}` : "unassigned";
@@ -668,7 +852,24 @@ function EventActionPicker({ actions, slots, saving, onAssign }: { actions: Acti
     else result.push({ key, eventTitle: action.event_title || "所属事件", actions: [action] });
     return result;
   }, []).map((group) => ({ ...group, actions: [...group.actions].sort((left, right) => left.sort_order - right.sort_order) }));
-  return <div className="daily-event-action-groups">{groups.map((group) => { const expanded = expandedKeys.has(group.key); return <section className="daily-event-action-group" key={group.key}><button type="button" className="daily-event-action-parent" aria-expanded={expanded} onClick={() => setExpandedKeys((current) => { const next = new Set(current); if (next.has(group.key)) next.delete(group.key); else next.add(group.key); return next; })}><span className="daily-event-action-parent-label">事件：</span><Typography.Text strong className="daily-event-action-parent-title" ellipsis={{ tooltip: group.eventTitle }}>{group.eventTitle}</Typography.Text><span className="daily-event-action-count">{group.actions.length}</span>{expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>{expanded && <div className="daily-event-action-children">{group.actions.map((action, index) => <button className={`daily-action-picker-item ${slots.some((item) => item.action_id === action.id) ? "selected" : ""}`} type="button" key={action.id} onClick={() => onAssign(action.id)} disabled={saving}><ActionPreview action={action} index={index + 1} scheduledToday={slots.some((item) => item.action_id === action.id)} hideEventRelation hideEventActionMeta /></button>)}</div>}</section>; })}</div>;
+  return <div className="daily-event-action-groups">{groups.map((group) => {
+    const expanded = expandedKeys.has(group.key);
+    return <section className="daily-event-action-group" key={group.key}>
+      <button type="button" className="daily-event-action-parent" aria-expanded={expanded} onClick={() => setExpandedKeys((current) => {
+        const next = new Set(current); if (next.has(group.key)) next.delete(group.key); else next.add(group.key); return next;
+      })}><span className="daily-event-action-parent-label">事件：</span>
+        <Typography.Text strong className="daily-event-action-parent-title" ellipsis={{ tooltip: group.eventTitle }}>{group.eventTitle}</Typography.Text>
+        <span className="daily-event-action-count">{group.actions.length}</span>{expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+      </button>
+      {expanded && <div className="daily-event-action-children">{group.actions.map((action, index) =>
+        selectedAi && onToggleAi ? <AiActionChoice key={action.id} action={action} index={index + 1} hideEvent
+          checked={selectedAi.includes(action.id)} disabled={saving} onToggle={() => onToggleAi(action.id)} /> :
+        <button className={`daily-action-picker-item ${slots.some((item) => item.action_id === action.id) ? "selected" : ""}`}
+          type="button" key={action.id} onClick={() => onAssign(action.id)} disabled={saving}>
+          <ActionPreview action={action} index={index + 1} scheduledToday={slots.some((item) => item.action_id === action.id)} hideEventRelation hideEventActionMeta />
+        </button>)}</div>}
+    </section>;
+  })}</div>;
 }
 function ActionPreview({ action, index, scheduledToday = false, hideEventRelation = false, hideEventActionMeta = false }: { action: Action; index?: number; scheduledToday?: boolean; hideEventRelation?: boolean; hideEventActionMeta?: boolean }) {
   const eventLabel = action.event_title ? `所属事件：${action.event_title}` : "";
