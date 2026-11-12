@@ -1,2 +1,27 @@
-# LifePlan-downloads-stage
-Installer-only staging repository for LifePlan OY / 肥鱼日程
+# 肥鱼日程
+
+肥鱼日程（安装名 LifePlan OY）是一款免费的本地桌面行动安排与复盘工具。
+
+- 官网与使用说明：[ouyangyu.tech/life](https://ouyangyu.tech/life/)
+- 最新安装包：[下载发布版本](https://github.com/ouyangyu98/LifePlan/releases/latest)
+- 支持平台：Windows x64、macOS Apple Silicon（M 系列芯片）。
+
+## 此仓库的用途
+
+此公开仓库只提供安装包、更新清单、签名、校验值和版本说明，不公开客户端源码。
+GitHub 自动生成的 Source code 压缩包不是客户端源码，不是安装包。
+
+软件继续免费提供。下载和自动更新不要求 GitHub 登录，已有客户端的数据目录和更新签名保持不变。
+免费使用不表示授予源代码、产品名称、图标或其他素材的复制、修改或再分发许可。
+第三方组件的权利及许可保持各自约定；本说明不替代第三方许可证。
+
+## 安全与数据
+
+请从官网或本仓库 Releases 下载，核对版本、平台和 SHA-256。
+更新包的签名校验与操作系统的安装包签名、公证不是一回事，以各版本安装说明为准。
+升级前保留备份。不要在公开反馈中上传数据库、私人日程、API Key 或完整诊断日志。
+
+## 来源
+
+本产品由 ouyangyu98 基于朋友 9527GC 的 LifePlan 持续维护，
+不是上游作者的官方发行版。感谢上游提供的基础；第三方贡献与组件权利不因仓库可见性变化而改变。
